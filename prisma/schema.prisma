@@ -1,0 +1,48 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum TipoAtendimento {
+  PARTICULAR
+  CONVENIO
+}
+
+enum TurnoPreferencia {
+  MANHA
+  TARDE
+  QUALQUER
+}
+
+enum StatusLead {
+  NOVO
+  AGUARDANDO_CONFIRMACAO
+  AGENDADO
+  TRANSBORDO_HUMANO
+}
+
+model Lead {
+  id                 String            @id @default(uuid())
+  nomeCompleto       String
+  telefone           String            @unique
+  procedimento       String
+  tipoAtendimento    TipoAtendimento
+  nomeConvenio       String?
+  periodoPreferencia TurnoPreferencia? @default(QUALQUER)
+  status             StatusLead        @default(NOVO)
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+}
+
+model SessionControl {
+  id               String    @id @default(uuid())
+  telefone         String    @unique
+  iaPausada        Boolean   @default(false)
+  pausadaAte       DateTime?
+  ultimaInteracao  DateTime  @default(now())
+  atendimentoAtivo Boolean   @default(true)
+}

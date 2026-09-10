@@ -1,0 +1,7 @@
+{
+    "DockerRun.DisableDockerrc": true,
+    "prisma.pinToPrisma6": true,
+    "DockerRun.Containers": [
+        "403a4432707c"
+    ]
+}

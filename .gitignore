@@ -1,0 +1,37 @@
+# Dependências
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Compilação e Build
+dist/
+build/
+*.tsbuildinfo
+
+# Variáveis de Ambiente e Segredos (NUNCA SUBIR)
+.env
+.env.local
+.env.*.local
+*.env
+
+# Sessão e Credenciais do WhatsApp (Baileys)
+auth_info_baileys/
+baileys_store/
+
+# Volumes de Banco de Dados Locais
+postgres_data/
+
+# Logs e Depuração
+logs/
+*.log
+npm-cache_logs/
+pino-*.log
+
+# Arquivos do Sistema Operacional e IDEs
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
