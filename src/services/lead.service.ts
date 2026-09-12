@@ -45,6 +45,24 @@ export class LeadService {
     });
   }
 
+  public static async isIaPausada(telefone: string): Promise<boolean> {
+    const session = await prisma.sessionControl.findUnique({
+      where: { telefone },
+    });
+
+    if (!session || !session.iaPausada) return false;
+
+    if (session.pausadaAte && new Date() > session.pausadaAte) {
+      await prisma.sessionControl.update({
+        where: { telefone },
+        data: { iaPausada: false, pausadaAte: null },
+      });
+      return false;
+    }
+
+    return true;
+  }
+
   public static async verificarEAtualizarSessao(telefone: string): Promise<{ pausada: boolean; expirada: boolean }> {
     const session = await prisma.sessionControl.findUnique({
       where: { telefone },
@@ -87,8 +105,19 @@ export class LeadService {
   public static async encerrarAtendimento(telefone: string) {
     return await prisma.sessionControl.upsert({
       where: { telefone },
-      update: { atendimentoAtivo: false, ultimaInteracao: new Date() },
-      create: { telefone, atendimentoAtivo: false, ultimaInteracao: new Date() },
+      update: {
+        atendimentoAtivo: false,
+        iaPausada: false,
+        pausadaAte: null,
+        ultimaInteracao: new Date(),
+      },
+      create: {
+        telefone,
+        atendimentoAtivo: false,
+        iaPausada: false,
+        pausadaAte: null,
+        ultimaInteracao: new Date(),
+      },
     });
   }
 

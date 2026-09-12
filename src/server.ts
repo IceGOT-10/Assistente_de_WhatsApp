@@ -26,7 +26,7 @@ app.get("/api/leads", async (req, res) => {
 app.post("/api/whatsapp/disconnect", async (req, res) => {
   try {
     await WhatsAppGateway.desconectarEReiniciar();
-    res.json({ success: true, message: "WhatsApp desconectado. Novo QR Code disponível no terminal do servidor." });
+    res.json({ success: true, message: "WhatsApp desconectado. Escaneie o novo QR Code caso o gateway esteja ativo." });
   } catch (error) {
     console.error("Erro ao desconectar WhatsApp:", error);
     res.status(500).json({ error: "Erro ao desvincular WhatsApp" });
@@ -39,8 +39,11 @@ app.post("/api/sessions/:telefone/reset", async (req, res) => {
     await LeadService.encerrarAtendimento(telefone);
     GeminiService.limparHistorico(`${telefone}@s.whatsapp.net`);
     GeminiService.limparHistorico(`${telefone}@lid`);
-    res.json({ success: true, message: `Atendimento resetado com sucesso para ${telefone}` });
+    GeminiService.limparHistorico(telefone);
+    console.log(`🔄 [Reset] Sessão e pausa da IA totalmente liberadas para ${telefone}`);
+    res.json({ success: true, message: `Atendimento e pausa resetados com sucesso para ${telefone}` });
   } catch (error) {
+    console.error("Erro ao resetar atendimento:", error);
     res.status(500).json({ error: "Erro ao resetar atendimento" });
   }
 });
@@ -51,15 +54,32 @@ app.post("/api/test/simulate-message", async (req, res) => {
     return res.status(400).json({ error: "remoteJid e text são obrigatórios" });
   }
 
+  const telefoneLimpo = remoteJid.replace("@s.whatsapp.net", "").replace("@lid", "");
   console.log(`\n📩 [Simulador] Mensagem Recebida de ${remoteJid}:\n${text}`);
 
-  const quickReply = QuickRepliesService.getQuickReply(text);
-  if (quickReply) {
-    GeminiService.registrarNoHistorico(remoteJid, text, quickReply);
-    console.log(`⚡ [Simulador] Resposta Rápida:\n${quickReply}\n`);
-    return res.json({ reply: quickReply, source: "quick_reply" });
+  // 1. Checa se o atendimento está transferido para humano ANTES de qualquer resposta
+  const pausada = await LeadService.isIaPausada(telefoneLimpo);
+  if (pausada) {
+    const avisoPausa = "⚠️ Seu atendimento já foi transferido para nossa equipe de recepção. Um atendente humano responderá em breve!";
+    console.log(`⏸️ [Simulador] Atendimento pausado para humano: ${telefoneLimpo}`);
+    return res.json({ reply: avisoPausa, source: "gemini" });
   }
 
+  // 2. Roteamento Híbrido Rápido (só entra se não estiver pausado)
+  const quickReply = QuickRepliesService.getQuickReply(text);
+  if (quickReply) {
+    let cleanReply = quickReply;
+    if (quickReply.includes("[PAUSAR_IA]")) {
+      await LeadService.pausarIA(telefoneLimpo, 60);
+      cleanReply = quickReply.replace("[PAUSAR_IA]", "").trim();
+    }
+
+    GeminiService.registrarNoHistorico(remoteJid, text, cleanReply);
+    console.log(`⚡ [Simulador] Resposta Rápida:\n${cleanReply}\n`);
+    return res.json({ reply: cleanReply, source: "quick_reply" });
+  }
+
+  // 3. Processamento Cognitivo Gemini
   try {
     const botReply = await GeminiService.processarMensagem(remoteJid, text);
     console.log(`🤖 [Simulador] Resposta Gemini:\n${botReply}\n`);
@@ -77,6 +97,7 @@ function iniciarMonitorDeInatividade() {
   setInterval(async () => {
     try {
       const limiteData = new Date(Date.now() - LIMITE_INATIVIDADE_MINUTOS * 60 * 1000);
+
       const sessoesExpiradas = await prisma.sessionControl.findMany({
         where: {
           atendimentoAtivo: true,
@@ -92,9 +113,14 @@ function iniciarMonitorDeInatividade() {
         GeminiService.limparHistorico(`${sessao.telefone}@lid`);
 
         const mensagemDespedida = "Como não tivemos novas mensagens por alguns minutos, estou finalizando este atendimento para manter seus dados seguros. Se precisar de algo mais, basta mandar um novo 'Oi'! Tenha um ótimo dia! ✨";
+
         if (WhatsAppGateway.sock) {
-          await WhatsAppGateway.sock.sendMessage(jid, { text: mensagemDespedida });
-          console.log(`⏰ [Auto-Encerramento Ativo] Notificação de inatividade enviada para ${jid}`);
+          try {
+            await WhatsAppGateway.sock.sendMessage(jid, { text: mensagemDespedida });
+            console.log(`⏰ [Auto-Encerramento Ativo] Notificação de inatividade enviada para ${jid}`);
+          } catch (e) {
+            console.warn(`[Auto-Encerramento] Não foi possível notificar via WhatsApp para ${jid}`);
+          }
         }
       }
     } catch (err) {
@@ -112,12 +138,26 @@ async function bootstrap() {
   await WhatsAppGateway.init(async (remoteJid, consolidatedText) => {
     console.log(`\n📩 [Mensagem Recebida de ${remoteJid}]:\n${consolidatedText}`);
 
+    const telefoneLimpo = remoteJid.replace("@s.whatsapp.net", "").replace("@lid", "");
+
+    // Se a IA estiver pausada para atendente humano, não manda Quick Reply
+    const pausada = await LeadService.isIaPausada(telefoneLimpo);
+    if (pausada) {
+      return; // O bot fica em silêncio no WhatsApp real aguardando o humano
+    }
+
     const quickReply = QuickRepliesService.getQuickReply(consolidatedText);
     if (quickReply) {
+      let cleanReply = quickReply;
+      if (quickReply.includes("[PAUSAR_IA]")) {
+        await LeadService.pausarIA(telefoneLimpo, 60);
+        cleanReply = quickReply.replace("[PAUSAR_IA]", "").trim();
+      }
+
       if (WhatsAppGateway.sock) {
-        await WhatsAppGateway.sock.sendMessage(remoteJid, { text: quickReply });
-        console.log(`⚡ [Resposta Rápida Pré-Feita Enviada]:\n${quickReply}\n`);
-        GeminiService.registrarNoHistorico(remoteJid, consolidatedText, quickReply);
+        await WhatsAppGateway.sock.sendMessage(remoteJid, { text: cleanReply });
+        console.log(`⚡ [Resposta Rápida Pré-Feita Enviada]:\n${cleanReply}\n`);
+        GeminiService.registrarNoHistorico(remoteJid, consolidatedText, cleanReply);
       }
       return;
     }
@@ -136,11 +176,18 @@ async function bootstrap() {
 
     try {
       const botReply = await GeminiService.processarMensagem(remoteJid, consolidatedText);
+      let cleanBotReply = botReply;
+      if (botReply.includes("[PAUSAR_IA]")) {
+        const telefoneLimpo = remoteJid.replace("@s.whatsapp.net", "").replace("@lid", "");
+        await LeadService.pausarIA(telefoneLimpo, 60);
+        cleanBotReply = botReply.replace("[PAUSAR_IA]", "").trim();
+      }
+
       if (timeoutAviso) clearTimeout(timeoutAviso);
 
-      if (botReply && WhatsAppGateway.sock) {
-        await WhatsAppGateway.sock.sendMessage(remoteJid, { text: botReply });
-        console.log(`🤖 [Resposta Enviada]:\n${botReply}\n`);
+      if (cleanBotReply && WhatsAppGateway.sock) {
+        await WhatsAppGateway.sock.sendMessage(remoteJid, { text: cleanBotReply });
+        console.log(`🤖 [Resposta Enviada]:\n${cleanBotReply}\n`);
       }
     } catch (error) {
       if (timeoutAviso) clearTimeout(timeoutAviso);

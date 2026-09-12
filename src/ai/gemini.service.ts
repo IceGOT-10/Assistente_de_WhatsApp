@@ -12,7 +12,7 @@ export class GeminiService {
   private static userHistories = new Map<string, MessageHistory[]>();
   private static aiInstance: any = null;
 
-  private static async getClient(): Promise<any> {
+  private static async getClient() {
     if (!this.aiInstance) {
       const { GoogleGenAI } = await (eval('import("@google/genai")') as Promise<{ GoogleGenAI: any }>);
       this.aiInstance = new GoogleGenAI({ apiKey: ENV.GEMINI_API_KEY });
@@ -24,9 +24,7 @@ export class GeminiService {
     const history = this.userHistories.get(remoteJid) || [];
     history.push({ role: "user", text: userText });
     history.push({ role: "model", text: modelReply });
-    if (history.length > 20) {
-      history.splice(0, history.length - 20);
-    }
+    if (history.length > 20) history.splice(0, history.length - 20);
     this.userHistories.set(remoteJid, history);
   }
 
@@ -57,7 +55,9 @@ export class GeminiService {
     const telefoneLimpo = remoteJid.replace("@s.whatsapp.net", "").replace("@lid", "");
 
     const { pausada, expirada } = await LeadService.verificarEAtualizarSessao(telefoneLimpo);
-    if (pausada) return "";
+    if (pausada) {
+      return "⚠️ Seu atendimento já foi transferido para nossa equipe de recepção. Um atendente humano responderá em breve!";
+    }
 
     if (expirada) {
       this.limparHistorico(remoteJid);
@@ -79,7 +79,7 @@ export class GeminiService {
       }));
 
       const response = await this.callWithRetry(ai, {
-        model: "gemini-3.1-flash-lite",
+        model: "gemini-2.5-flash",
         contents,
         config: {
           systemInstruction: SYSTEM_INSTRUCTION,
@@ -121,13 +121,12 @@ export class GeminiService {
         reply = "Entendido! Como posso ajudar você?";
       }
 
-      if (!reply) {
-        reply = "Entendido! Caso precise de mais algo, estou à disposição.";
-      }
-
       if (reply.includes("[PAUSAR_IA]")) {
         await LeadService.pausarIA(telefoneLimpo, 60);
-        const cleanedReply = reply.replace("[PAUSAR_IA]", "").trim();
+        let cleanedReply = reply.replace("[PAUSAR_IA]", "").trim();
+        if (!cleanedReply) {
+          cleanedReply = "Com certeza! Estou pausando meu atendimento e transferindo você para a nossa recepção humana. Em instantes um de nossos atendentes falará com você por aqui! 👩‍💼";
+        }
         history.push({ role: "model", text: cleanedReply });
         this.userHistories.set(remoteJid, history);
         return cleanedReply;
@@ -136,8 +135,11 @@ export class GeminiService {
       if (reply.includes("[ENCERRAR_ATENDIMENTO]")) {
         await LeadService.encerrarAtendimento(telefoneLimpo);
         this.limparHistorico(remoteJid);
-        const cleanedReply = reply.replace("[ENCERRAR_ATENDIMENTO]", "").trim();
-        return cleanedReply;
+        return reply.replace("[ENCERRAR_ATENDIMENTO]", "").trim();
+      }
+
+      if (!reply) {
+        reply = "Entendido! Caso precise de mais algo, estou à disposição.";
       }
 
       history.push({ role: "model", text: reply });
@@ -145,7 +147,7 @@ export class GeminiService {
 
       return reply;
     } catch (error) {
-      console.error("[GeminiService] Erro ao comunicar com API após retries:", error);
+      console.error("[GeminiService] Erro ao comunicar com API:", error);
       return "Olá! Tivemos uma oscilação momentânea em nosso sistema de mensagens. Um atendente da clínica falará com você em breve!";
     }
   }

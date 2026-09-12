@@ -20,6 +20,19 @@ export class QuickRepliesService {
 
   private static rules: FastRule[] = [
     {
+      intent: "TRANSBORDO_HUMANO",
+      keywords: [
+        "atendente",
+        "falar com humano",
+        "falar com atendente",
+        "pessoa real",
+        "suporte humano",
+        "atendente humana",
+        "recepcao",
+      ],
+      reply: `Com certeza! Já avisei a nossa recepção e estou transferindo seu contato para um atendente humano agora mesmo. Em breve nossa equipe responderá por aqui! 👩‍💼\n\n[PAUSAR_IA]`,
+    },
+    {
       intent: "SAUDACAO_ISOLADA",
       exactOnly: true,
       keywords: [
@@ -34,7 +47,7 @@ export class QuickRepliesService {
       keywords: [
         "quais os procedimentos", "quais procedimentos", "o que voces fazem",
         "quais servicos", "servicos oferecidos", "tratamentos disponiveis",
-        "tabela de procedimentos", "especialidades", "tratamentos",
+        "tabela de procedimentos", "especialidades",
       ],
       reply: `🦷 *Tratamentos e Especialidades na ${ENV.CLINIC_NAME}:*\n\n• *Clínica Geral:* Limpeza profilática, restaurações e extrações.\n• *Estética Dental:* Clareamento dental a laser/caseiro e facetas.\n• *Ortodontia:* Aparelhos fixos convencionais e alinhadores invisíveis.\n• *Implantodontia e Próteses:* Reabilitação oral e implantes.\n• *Harmonização Orofacial:* Aplicação de Botox.\n\nQual desses procedimentos você gostaria de realizar ou avaliar?`,
     },
@@ -43,7 +56,6 @@ export class QuickRepliesService {
       keywords: [
         "quanto custa", "qual o valor", "qual o preco", "preco", "precos",
         "valores", "tabela de precos", "quanto e", "orcamento", "valor da consulta",
-        "valor",
       ],
       reply: `Como cada paciente possui necessidades específicas e os procedimentos odontológicos dependem de avaliação anatômica prévia, não fornecemos valores fechados antes da consulta presencial com nossos dentistas.\n\nPodemos fazer o seu pré-agendamento de avaliação agora mesmo! Qual procedimento você gostaria de realizar?`,
     },
@@ -68,21 +80,6 @@ export class QuickRepliesService {
       reply: `🏥 *Atendimento a Convênios:*\n\nAtendemos de forma particular e com cobertura via operadoras parceiras (Amil, Bradesco Dental, SulAmérica, OdontoPrev, Unimed Odonto).\n\nQual é o nome do seu convênio e qual tratamento deseja realizar?`,
     },
     {
-      intent: "CLAREAMENTO",
-      keywords: ["clareamento", "clarear os dentes", "clareamento dental", "clareamento a laser", "clareamento caseiro"],
-      reply: `✨ *Clareamento Dental na ${ENV.CLINIC_NAME}:*\n\nRealizamos tanto o Clareamento a Laser em consultório quanto o Clareamento Caseiro supervisionado, com rapidez e segurança.\n\nPara agendarmos sua avaliação, informe:\n1. Seu *nome completo*\n2. Atendimento *particular ou convênio*\n3. Preferência de turno (*manhã ou tarde*)`,
-    },
-    {
-      intent: "LIMPEZA",
-      keywords: ["limpeza", "profilaxia", "tartaro", "placa bacteriana", "limpeza dental"],
-      reply: `🦷 *Limpeza Dental (Profilaxia):*\n\nNosso procedimento inclui remoção completa de tártaro, profilaxia com jato de bicarbonato e aplicação de flúor.\n\nPara agendarmos, informe seu *nome completo*, se prefere *particular ou convênio* e o turno de preferência (*manhã ou tarde*).`,
-    },
-    {
-      intent: "BOTOX",
-      keywords: ["botox", "toxina botulinica", "harmonizacao", "harmonizacao facial"],
-      reply: `🌸 *Harmonização e Botox:*\n\nTrabalhamos com aplicação estética e terapêutica de toxina botulínica realizada por especialistas.\n\nPara agendar uma avaliação, qual seu *nome completo* e qual turno prefere (*manhã ou tarde*)?`,
-    },
-    {
       intent: "AGRADECIMENTO",
       keywords: ["obrigado", "obrigada", "valeu", "show", "tchau", "ate logo", "agradeco"],
       reply: `Por nada! A equipe da ${ENV.CLINIC_NAME} está à disposição para cuidar do seu sorriso. Tenha um excelente dia! ✨`,
@@ -97,8 +94,15 @@ export class QuickRepliesService {
         if (rule.keywords.some((kw) => text === this.normalize(kw))) {
           return rule.reply;
         }
-      } else if (rule.keywords.some((kw) => text.includes(this.normalize(kw)))) {
-        return rule.reply;
+      } else {
+        const matched = rule.keywords.some((kw) => {
+          const normKw = this.normalize(kw);
+          return text.includes(normKw);
+        });
+
+        if (matched) {
+          return rule.reply;
+        }
       }
     }
 

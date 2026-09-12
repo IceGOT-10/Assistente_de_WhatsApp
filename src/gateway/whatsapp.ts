@@ -15,6 +15,13 @@ export class WhatsAppGateway {
 
   public static async init(onMessageReceived: (jid: string, text: string) => Promise<string | void>): Promise<any> {
     this.onMessageCallback = onMessageReceived;
+
+    if (process.env.ENABLE_WHATSAPP_GATEWAY !== "true") {
+      console.log("[WhatsApp] Gateway desativado para testes locais (defina ENABLE_WHATSAPP_GATEWAY=true no .env para ativar)");
+      this.sock = null;
+      return null;
+    }
+
     const baileys = await this.getBaileys();
     const {
       default: makeWASocket,
@@ -86,15 +93,31 @@ export class WhatsAppGateway {
   }
 
   public static async desconectarEReiniciar(): Promise<void> {
+    console.log("⚠️ [WhatsApp] Solicitada desvinculação de conta...");
+
     if (this.sock) {
-      await this.sock.logout();
+      try {
+        await this.sock.logout();
+      } catch (err) {
+        console.warn("[WhatsApp] Aviso ao executar logout:", err);
+      }
+      try {
+        this.sock.end(undefined);
+      } catch (err) {
+        console.warn("[WhatsApp] Socket já finalizado.");
+      }
       this.sock = null;
     }
 
     const authFolder = path.resolve(process.cwd(), "auth_info_baileys");
-    fs.rmSync(authFolder, { recursive: true, force: true });
+    if (fs.existsSync(authFolder)) {
+      fs.rmSync(authFolder, { recursive: true, force: true });
+      console.log("🗑️ [WhatsApp] Credenciais locais 'auth_info_baileys' removidas.");
+    }
 
     if (this.onMessageCallback) {
+      process.env.ENABLE_WHATSAPP_GATEWAY = "true";
+      console.log("🔄 [WhatsApp] Gerando nova sessão...");
       await this.init(this.onMessageCallback);
     }
   }
