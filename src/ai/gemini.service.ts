@@ -79,7 +79,7 @@ export class GeminiService {
       }));
 
       const response = await this.callWithRetry(ai, {
-        model: "gemini-2.5-flash",
+        model: "gemini-3.1-flash-lite",
         contents,
         config: {
           systemInstruction: SYSTEM_INSTRUCTION,

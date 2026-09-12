@@ -1,4 +1,5 @@
-import express from "express";
+﻿import express from "express";
+import cors from "cors";
 import { PrismaClient } from "@prisma/client";
 import { ENV } from "./config/env";
 import { WhatsAppGateway } from "./gateway/whatsapp";
@@ -8,6 +9,8 @@ import { QuickRepliesService } from "./services/quickReplies.service";
 
 const prisma = new PrismaClient();
 const app = express();
+
+app.use(cors());
 app.use(express.json());
 
 app.get("/api/health", (req, res) => {
@@ -20,6 +23,24 @@ app.get("/api/leads", async (req, res) => {
     res.json(leads);
   } catch (error) {
     res.status(500).json({ error: "Erro ao buscar leads" });
+  }
+});
+
+app.patch("/api/leads/:id/status", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    const leadAtualizado = await prisma.lead.update({
+      where: { id },
+      data: { status },
+    });
+
+    console.log(`📋 [Lead Atualizado] ${leadAtualizado.nomeCompleto} movido para ${status}`);
+    res.json(leadAtualizado);
+  } catch (error) {
+    console.error("Erro ao atualizar status do lead:", error);
+    res.status(500).json({ error: "Erro ao atualizar status do lead" });
   }
 });
 
@@ -57,7 +78,6 @@ app.post("/api/test/simulate-message", async (req, res) => {
   const telefoneLimpo = remoteJid.replace("@s.whatsapp.net", "").replace("@lid", "");
   console.log(`\n📩 [Simulador] Mensagem Recebida de ${remoteJid}:\n${text}`);
 
-  // 1. Checa se o atendimento está transferido para humano ANTES de qualquer resposta
   const pausada = await LeadService.isIaPausada(telefoneLimpo);
   if (pausada) {
     const avisoPausa = "⚠️ Seu atendimento já foi transferido para nossa equipe de recepção. Um atendente humano responderá em breve!";
@@ -65,7 +85,6 @@ app.post("/api/test/simulate-message", async (req, res) => {
     return res.json({ reply: avisoPausa, source: "gemini" });
   }
 
-  // 2. Roteamento Híbrido Rápido (só entra se não estiver pausado)
   const quickReply = QuickRepliesService.getQuickReply(text);
   if (quickReply) {
     let cleanReply = quickReply;
@@ -79,7 +98,6 @@ app.post("/api/test/simulate-message", async (req, res) => {
     return res.json({ reply: cleanReply, source: "quick_reply" });
   }
 
-  // 3. Processamento Cognitivo Gemini
   try {
     const botReply = await GeminiService.processarMensagem(remoteJid, text);
     console.log(`🤖 [Simulador] Resposta Gemini:\n${botReply}\n`);
@@ -140,10 +158,9 @@ async function bootstrap() {
 
     const telefoneLimpo = remoteJid.replace("@s.whatsapp.net", "").replace("@lid", "");
 
-    // Se a IA estiver pausada para atendente humano, não manda Quick Reply
     const pausada = await LeadService.isIaPausada(telefoneLimpo);
     if (pausada) {
-      return; // O bot fica em silêncio no WhatsApp real aguardando o humano
+      return;
     }
 
     const quickReply = QuickRepliesService.getQuickReply(consolidatedText);
@@ -176,18 +193,11 @@ async function bootstrap() {
 
     try {
       const botReply = await GeminiService.processarMensagem(remoteJid, consolidatedText);
-      let cleanBotReply = botReply;
-      if (botReply.includes("[PAUSAR_IA]")) {
-        const telefoneLimpo = remoteJid.replace("@s.whatsapp.net", "").replace("@lid", "");
-        await LeadService.pausarIA(telefoneLimpo, 60);
-        cleanBotReply = botReply.replace("[PAUSAR_IA]", "").trim();
-      }
-
       if (timeoutAviso) clearTimeout(timeoutAviso);
 
-      if (cleanBotReply && WhatsAppGateway.sock) {
-        await WhatsAppGateway.sock.sendMessage(remoteJid, { text: cleanBotReply });
-        console.log(`🤖 [Resposta Enviada]:\n${cleanBotReply}\n`);
+      if (botReply && WhatsAppGateway.sock) {
+        await WhatsAppGateway.sock.sendMessage(remoteJid, { text: botReply });
+        console.log(`🤖 [Resposta Enviada]:\n${botReply}\n`);
       }
     } catch (error) {
       if (timeoutAviso) clearTimeout(timeoutAviso);
