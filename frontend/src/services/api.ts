@@ -1,5 +1,5 @@
 import axios from "axios";
-import type { Lead, LeadStatus } from "../types/lead";
+import type { Lead, LeadStatus, UpdateLeadDTO } from "../types/lead";
 
 const API_BASE_URL = "http://localhost:3000/api";
 
@@ -17,6 +17,14 @@ export const api = {
    */
   async getLeads(): Promise<Lead[]> {
     const response = await apiClient.get<Lead[]>("/leads");
+    return response.data;
+  },
+
+  /**
+   * Atualiza os dados cadastrais do lead (edição na recepção).
+   */
+  async updateLead(id: string, data: UpdateLeadDTO): Promise<Lead> {
+    const response = await apiClient.put<Lead>(`/leads/${id}`, data);
     return response.data;
   },
 

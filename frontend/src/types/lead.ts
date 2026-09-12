@@ -17,8 +17,27 @@ export interface Lead {
   nomeConvenio?: string | null;
   periodoPreferencia?: PeriodoPreferencia;
   status: LeadStatus;
+  observacoes?: string | null;
+  dataAgendamento?: string | null;
+  horarioAgendado?: string | null;
   createdAt: string;
   updatedAt?: string;
+}
+
+export type ThemeMode = "light" | "dark" | "system";
+export type ViewMode = "kanban" | "calendar";
+
+export interface UpdateLeadDTO {
+  nomeCompleto?: string;
+  telefone?: string;
+  procedimento?: string;
+  tipoAtendimento?: TipoAtendimento;
+  nomeConvenio?: string | null;
+  periodoPreferencia?: PeriodoPreferencia;
+  observacoes?: string | null;
+  dataAgendamento?: string | null;
+  horarioAgendado?: string | null;
+  status?: LeadStatus;
 }
 
 export interface ColumnConfig {

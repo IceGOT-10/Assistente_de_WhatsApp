@@ -44,6 +44,30 @@ app.patch("/api/leads/:id/status", async (req, res) => {
   }
 });
 
+app.put("/api/leads/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { nomeCompleto, telefone, procedimento, tipoAtendimento, nomeConvenio, periodoPreferencia } = req.body;
+
+    const leadAtualizado = await prisma.lead.update({
+      where: { id },
+      data: {
+        nomeCompleto,
+        telefone,
+        procedimento,
+        tipoAtendimento,
+        nomeConvenio,
+        periodoPreferencia,
+      },
+    });
+
+    res.json(leadAtualizado);
+  } catch (error) {
+    console.error("Erro ao atualizar lead:", error);
+    res.status(500).json({ error: "Erro ao salvar alterações do lead" });
+  }
+});
+
 app.post("/api/whatsapp/disconnect", async (req, res) => {
   try {
     await WhatsAppGateway.desconectarEReiniciar();
