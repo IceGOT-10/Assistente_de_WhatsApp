@@ -7,9 +7,15 @@ import type { ConversationSummary, ChatMessage } from "../../types/chat";
 
 interface ChatViewProps {
   onEditCustomer?: (leadId: string) => void;
+  onScheduleCustomer?: (leadData: any) => void;
+  onNotification?: (type: "success" | "error" | "info", title: string, message: string) => void;
 }
 
-export const ChatView: React.FC<ChatViewProps> = ({ onEditCustomer }) => {
+export const ChatView: React.FC<ChatViewProps> = ({
+  onEditCustomer,
+  onScheduleCustomer,
+  onNotification,
+}) => {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [selectedTelefone, setSelectedTelefone] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -78,9 +84,29 @@ export const ChatView: React.FC<ChatViewProps> = ({ onEditCustomer }) => {
   // Assumir atendimento (takeover)
   const handleTakeover = async () => {
     if (!selectedTelefone) return;
-    await api.takeoverSession(selectedTelefone);
-    await carregarMensagens(selectedTelefone, false);
-    await carregarConversas();
+    try {
+      await api.takeoverSession(selectedTelefone);
+      await carregarMensagens(selectedTelefone, false);
+      await carregarConversas();
+      onNotification?.("info", "Atendimento Assumido", "A IA Sofia foi pausada e o atendimento manual está ativo.");
+    } catch (error) {
+      console.error("Erro ao assumir atendimento:", error);
+      onNotification?.("error", "Erro ao pausar IA", "Não foi possível pausar a IA Sofia.");
+    }
+  };
+
+  // Retomar atendimento pela IA Sofia
+  const handleResume = async () => {
+    if (!selectedTelefone) return;
+    try {
+      await api.resumeSession(selectedTelefone);
+      await carregarMensagens(selectedTelefone, false);
+      await carregarConversas();
+      onNotification?.("success", "IA Sofia Reativada", "A assistente de IA Sofia reassumiu o atendimento deste paciente.");
+    } catch (error) {
+      console.error("Erro ao retomar IA:", error);
+      onNotification?.("error", "Erro ao reativar IA", "Não foi possível devolver o atendimento para a IA.");
+    }
   };
 
   const activeConversation = conversations.find((c) => c.telefone === selectedTelefone) || null;
@@ -128,6 +154,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ onEditCustomer }) => {
         messages={messages}
         onSendMessage={handleSendMessage}
         onTakeover={handleTakeover}
+        onResume={handleResume}
         isLoading={isLoadingMessages}
       />
 
@@ -139,6 +166,18 @@ export const ChatView: React.FC<ChatViewProps> = ({ onEditCustomer }) => {
             onEditCustomer={() => {
               if (onEditCustomer && activeConversation) {
                 onEditCustomer(activeConversation.telefone);
+              }
+            }}
+            onSchedule={() => {
+              if (activeConversation && onScheduleCustomer) {
+                onScheduleCustomer({
+                  id: activeConversation.leadId,
+                  nomeCompleto: activeConversation.nome,
+                  telefone: activeConversation.telefone,
+                  procedimento: activeConversation.procedimento || "Avaliação Geral",
+                  tipoAtendimento: activeConversation.tipoAtendimento || "PARTICULAR",
+                  nomeConvenio: null,
+                });
               }
             }}
             onSaveNotes={handleSaveNotes}

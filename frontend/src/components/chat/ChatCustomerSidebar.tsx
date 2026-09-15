@@ -5,18 +5,21 @@ import {
   Save,
   Check,
   FileText,
+  Calendar,
 } from "lucide-react";
 import type { ConversationSummary } from "../../types/chat";
 
 interface ChatCustomerSidebarProps {
   conversation: ConversationSummary | null;
   onEditCustomer: () => void;
+  onSchedule?: () => void;
   onSaveNotes?: (notes: string) => Promise<void>;
 }
 
 export const ChatCustomerSidebar: React.FC<ChatCustomerSidebarProps> = ({
   conversation,
   onEditCustomer,
+  onSchedule,
   onSaveNotes,
 }) => {
   const [notes, setNotes] = useState(() => conversation?.observacoes || "");
@@ -125,8 +128,17 @@ export const ChatCustomerSidebar: React.FC<ChatCustomerSidebarProps> = ({
         </button>
       </div>
 
-      {/* Botão Editar Cliente */}
-      <div className="pt-2">
+      {/* Ações Rápidas de Atendimento */}
+      <div className="pt-2 space-y-2">
+        <button
+          type="button"
+          onClick={onSchedule}
+          className="w-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center justify-center gap-2 shadow-xs transition-colors cursor-pointer"
+        >
+          <Calendar className="w-4 h-4" />
+          <span>+ Agendar Consulta</span>
+        </button>
+
         <button
           type="button"
           onClick={onEditCustomer}

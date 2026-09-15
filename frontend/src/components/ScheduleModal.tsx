@@ -7,6 +7,7 @@ import {
   FileText,
   User,
   Sparkles,
+  AlertTriangle,
 } from "lucide-react";
 import type { Lead } from "../types/lead";
 import { formatPhone } from "../utils/formatters";
@@ -85,12 +86,23 @@ const ScheduleModalForm: React.FC<ScheduleModalFormProps> = ({
   const [horario, setHorario] = useState<string>(getDefaultHorario);
   const [profissional, setProfissional] = useState<string>("Dra. Camila Duarte");
   const [obs, setObs] = useState<string>(() => lead.observacoes || "");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!data || !horario) return;
-    await onConfirmSchedule(lead, data, horario, profissional, obs);
-    onClose();
+    setErrorMessage(null);
+    try {
+      await onConfirmSchedule(lead, data, horario, profissional, obs);
+      onClose();
+    } catch (err: any) {
+      console.error("Erro ao agendar consulta:", err);
+      const msg =
+        err?.response?.data?.error ||
+        err?.message ||
+        "Não foi possível confirmar o agendamento devido a conflito de horários ou regra da clínica.";
+      setErrorMessage(msg);
+    }
   };
 
   const getTurnoCalculado = (hora: string) => {
@@ -142,6 +154,13 @@ const ScheduleModalForm: React.FC<ScheduleModalFormProps> = ({
 
       {/* Form Body */}
       <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        {errorMessage && (
+          <div className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300 text-xs font-semibold flex items-start gap-2.5 animate-in fade-in duration-200">
+            <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600 dark:text-rose-400 mt-0.5" />
+            <div className="flex-1 leading-relaxed">{errorMessage}</div>
+          </div>
+        )}
+
         {lead.periodoPreferencia && (
           <div className="flex items-center gap-2 text-xs bg-amber-50 dark:bg-amber-950/40 border border-amber-200/70 dark:border-amber-900/50 text-amber-800 dark:text-amber-300 p-2.5 rounded-xl">
             <Sparkles className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
@@ -169,7 +188,10 @@ const ScheduleModalForm: React.FC<ScheduleModalFormProps> = ({
               type="date"
               required
               value={data}
-              onChange={(e) => setData(e.target.value)}
+              onChange={(e) => {
+                setData(e.target.value);
+                setErrorMessage(null);
+              }}
               className="w-full text-xs font-medium bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
             />
           </div>
@@ -184,7 +206,10 @@ const ScheduleModalForm: React.FC<ScheduleModalFormProps> = ({
               type="time"
               required
               value={horario}
-              onChange={(e) => setHorario(e.target.value)}
+              onChange={(e) => {
+                setHorario(e.target.value);
+                setErrorMessage(null);
+              }}
               className="w-full text-xs font-medium bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
             />
           </div>
@@ -198,7 +223,10 @@ const ScheduleModalForm: React.FC<ScheduleModalFormProps> = ({
           </label>
           <select
             value={profissional}
-            onChange={(e) => setProfissional(e.target.value)}
+            onChange={(e) => {
+              setProfissional(e.target.value);
+              setErrorMessage(null);
+            }}
             className="w-full text-xs font-medium bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 cursor-pointer"
           >
             <option value="Dra. Camila Duarte">Dra. Camila Duarte (Clínica Geral / Estética)</option>
@@ -217,7 +245,10 @@ const ScheduleModalForm: React.FC<ScheduleModalFormProps> = ({
                 <button
                   type="button"
                   key={time}
-                  onClick={() => setHorario(time)}
+                  onClick={() => {
+                    setHorario(time);
+                    setErrorMessage(null);
+                  }}
                   className={`px-2.5 py-1 text-xs rounded-lg border font-medium transition-all cursor-pointer ${
                     horario === time
                       ? "bg-emerald-600 text-white border-emerald-600 shadow-xs"

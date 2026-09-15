@@ -121,12 +121,39 @@ export class LeadService {
     });
   }
 
-  public static async pausarIA(telefone: string, minutos: number = 60) {
-    const pausadaAte = new Date(Date.now() + minutos * 60 * 1000);
+  /**
+   * Pausa o atendimento da IA para o contato.
+   * Se 'minutos' for null, a pausa é INDEFINIDA (intervenção manual firme) até que a recepção
+   * retome explicitamente o atendimento para a IA.
+   */
+  public static async pausarIA(telefone: string, minutos: number | null = null) {
+    const pausadaAte = minutos ? new Date(Date.now() + minutos * 60 * 1000) : null;
     return await prisma.sessionControl.upsert({
       where: { telefone },
       update: { iaPausada: true, pausadaAte, ultimaInteracao: new Date() },
       create: { telefone, iaPausada: true, pausadaAte, ultimaInteracao: new Date() },
+    });
+  }
+
+  /**
+   * Retoma o atendimento da assistente virtual IA, limpando a pausa manual da sessão.
+   */
+  public static async retomarIA(telefone: string) {
+    return await prisma.sessionControl.upsert({
+      where: { telefone },
+      update: {
+        iaPausada: false,
+        pausadaAte: null,
+        atendimentoAtivo: true,
+        ultimaInteracao: new Date(),
+      },
+      create: {
+        telefone,
+        iaPausada: false,
+        pausadaAte: null,
+        atendimentoAtivo: true,
+        ultimaInteracao: new Date(),
+      },
     });
   }
 

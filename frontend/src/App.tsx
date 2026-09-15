@@ -10,6 +10,7 @@ import { api } from "./services/api";
 import type {
   Lead,
   LeadStatus,
+  TipoAtendimento,
   ToastMessage,
   UpdateLeadDTO,
 } from "./types/lead";
@@ -214,7 +215,7 @@ export default function App() {
     try {
       setUpdatingId(lead.id);
       await api.createAppointment({
-        leadId: lead.id,
+        leadId: lead.id.startsWith("temp-chat-") ? undefined : lead.id,
         nomeCompleto: lead.nomeCompleto,
         telefone: lead.telefone,
         procedimento: lead.procedimento,
@@ -236,16 +237,58 @@ export default function App() {
         title: "Consulta Agendada no PostgreSQL!",
         message: `${lead.nomeCompleto} agendado para ${dataStr} às ${horarioStr} com ${profissional || "Dra. Camila Duarte"}.`,
       });
-    } catch (err) {
+    } catch (err: any) {
       console.error("Erro ao confirmar agendamento:", err);
+      const msg =
+        err?.response?.data?.error ||
+        err?.message ||
+        "Não foi possível confirmar o agendamento.";
       addToast({
         type: "error",
         title: "Erro ao agendar",
-        message: "Não foi possível confirmar o agendamento.",
+        message: msg,
       });
+      throw err;
     } finally {
       setUpdatingId(null);
     }
+  };
+
+  const handleScheduleFromChat = (leadData: {
+    id?: string | null;
+    nomeCompleto: string;
+    telefone: string;
+    procedimento?: string | null;
+    tipoAtendimento?: string | null;
+    nomeConvenio?: string | null;
+  }) => {
+    const cleanTel = leadData.telefone.replace(/\D/g, "");
+    const leadExistente = leads.find(
+      (l) =>
+        l.telefone.replace(/\D/g, "") === cleanTel ||
+        (leadData.id && l.id === leadData.id)
+    );
+
+    if (leadExistente) {
+      setLeadToSchedule(leadExistente);
+    } else {
+      const fallbackLead: Lead = {
+        id: leadData.id || `temp-chat-${Date.now()}`,
+        nomeCompleto: leadData.nomeCompleto,
+        telefone: leadData.telefone,
+        procedimento: leadData.procedimento || "Avaliação Geral",
+        tipoAtendimento: (leadData.tipoAtendimento as TipoAtendimento) || "PARTICULAR",
+        nomeConvenio: leadData.nomeConvenio || null,
+        periodoPreferencia: null,
+        status: "NOVO",
+        observacoes: null,
+        dataAgendamento: null,
+        horarioAgendado: null,
+        createdAt: new Date().toISOString(),
+      };
+      setLeadToSchedule(fallbackLead);
+    }
+    setIsScheduleModalOpen(true);
   };
 
   // Contagem de atendimentos que requerem intervenção humana
@@ -299,7 +342,13 @@ export default function App() {
           {activeTab === "agenda" && <CalendarView />}
 
           {activeTab === "atendimento" && (
-            <ChatView onEditCustomer={abrirDetalhesPorTelefone} />
+            <ChatView
+              onEditCustomer={abrirDetalhesPorTelefone}
+              onScheduleCustomer={handleScheduleFromChat}
+              onNotification={(type, title, message) =>
+                addToast({ type, title, message })
+              }
+            />
           )}
 
           {activeTab === "clientes" && (

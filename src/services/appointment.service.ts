@@ -2,6 +2,34 @@ import { PrismaClient, StatusAppointment, StatusLead, TipoAtendimento, TurnoPref
 
 const prisma = new PrismaClient();
 
+export class AppointmentConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AppointmentConflictError";
+  }
+}
+
+export class AppointmentValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AppointmentValidationError";
+  }
+}
+
+export function parseTimeToMinutes(timeStr: string): number {
+  const parts = timeStr.split(":").map(Number);
+  if (parts.length < 2 || isNaN(parts[0]) || isNaN(parts[1])) {
+    throw new AppointmentValidationError(`Horário inválido: '${timeStr}'. Use o formato HH:mm.`);
+  }
+  return parts[0] * 60 + parts[1];
+}
+
+export function minutesToTimeString(minutes: number): string {
+  const h = Math.floor(minutes / 60) % 24;
+  const m = minutes % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
 export interface CreateAppointmentDTO {
   leadId?: string;
   nomeCompleto: string;
@@ -37,6 +65,69 @@ export class AppointmentService {
   public static parseDateStringToUTC(dateStr: string): Date {
     const [year, month, day] = dateStr.split("-").map(Number);
     return new Date(Date.UTC(year, month - 1, day, 12, 0, 0, 0));
+  }
+
+  /**
+   * Valida regras de negócio essenciais para qualquer agendamento:
+   * 1. Bloqueio aos domingos
+   * 2. Duração mínima de 15 minutos e horarioInicio < horarioFim
+   * 3. Horário dentro do expediente clínico (08:00 às 18:00)
+   * 4. Bloqueio de sobreposição com o intervalo de almoço padrão (12:00 às 13:00)
+   */
+  public static validateScheduleRules(
+    dataStr: string,
+    horarioInicio: string,
+    horarioFim: string
+  ): {
+    dateObj: Date;
+    startMinutes: number;
+    endMinutes: number;
+  } {
+    const dateObj = this.parseDateStringToUTC(dataStr);
+
+    // 1. Bloqueia agendamentos aos domingos
+    if (dateObj.getUTCDay() === 0) {
+      throw new AppointmentValidationError(
+        "A clínica não realiza atendimentos aos domingos."
+      );
+    }
+
+    const startMinutes = parseTimeToMinutes(horarioInicio);
+    const endMinutes = parseTimeToMinutes(horarioFim);
+
+    // 2. Rejeita horarioInicio >= horarioFim
+    if (startMinutes >= endMinutes) {
+      throw new AppointmentValidationError(
+        `O horário de término (${horarioFim}) deve ser posterior ao horário de início (${horarioInicio}).`
+      );
+    }
+
+    // 3. Duração mínima de 15 minutos
+    if (endMinutes - startMinutes < 15) {
+      throw new AppointmentValidationError(
+        "A duração da consulta deve ser de no mínimo 15 minutos."
+      );
+    }
+
+    // 4. Bloqueia fora do expediente clínico (permitido apenas 08:00 às 18:00)
+    const CLINIC_OPEN = 8 * 60; // 480 min (08:00)
+    const CLINIC_CLOSE = 18 * 60; // 1080 min (18:00)
+    if (startMinutes < CLINIC_OPEN || endMinutes > CLINIC_CLOSE) {
+      throw new AppointmentValidationError(
+        "Horário fora do expediente da clínica. Os atendimentos são permitidos exclusivamente entre 08:00 e 18:00."
+      );
+    }
+
+    // 5. Bloqueia sobreposição no horário de almoço padrão da equipe (12:00 às 13:00)
+    const LUNCH_START = 12 * 60; // 720 min (12:00)
+    const LUNCH_END = 13 * 60; // 780 min (13:00)
+    if (startMinutes < LUNCH_END && endMinutes > LUNCH_START) {
+      throw new AppointmentValidationError(
+        "O agendamento não pode sobrepor o intervalo de almoço da equipe da clínica (12:00 às 13:00)."
+      );
+    }
+
+    return { dateObj, startMinutes, endMinutes };
   }
 
   /**
@@ -109,13 +200,102 @@ export class AppointmentService {
 
   /**
    * Cria um novo agendamento de forma atômica com prisma.$transaction.
-   * Cria ou atualiza o Lead, vincula a consulta e atualiza o status do Lead para AGENDADO.
+   * Valida expediente, almoço, conflito de horários (double-booking com sobreposição de intervalos)
+   * e cria ou atualiza o Lead vinculado com status AGENDADO.
    */
   public static async createAppointment(dto: CreateAppointmentDTO) {
     const cleanTelefone = dto.telefone.replace(/\D/g, "");
 
+    // 1. Calcula horarioFim padrão caso não fornecido
+    let horarioFim = dto.horarioFim;
+    if (!horarioFim && dto.horarioInicio) {
+      let duracao = 45;
+      if (dto.serviceId) {
+        const s = await prisma.service.findUnique({ where: { id: dto.serviceId } });
+        if (s?.duracaoMinutos) duracao = s.duracaoMinutos;
+      } else if (dto.procedimento) {
+        const s = await prisma.service.findFirst({
+          where: { nome: { contains: dto.procedimento, mode: "insensitive" } },
+        });
+        if (s?.duracaoMinutos) duracao = s.duracaoMinutos;
+      }
+      const startMin = parseTimeToMinutes(dto.horarioInicio);
+      horarioFim = minutesToTimeString(startMin + duracao);
+    }
+
+    if (!horarioFim) {
+      throw new AppointmentValidationError("Horário de término da consulta é obrigatório.");
+    }
+
+    // 2. Validações de expediente, domingo, duração e horário de almoço
+    const { dateObj, startMinutes, endMinutes } = this.validateScheduleRules(
+      dto.data,
+      dto.horarioInicio,
+      horarioFim
+    );
+
     return await prisma.$transaction(async (tx) => {
-      // 1. Busca ou cria o Lead atomicamente
+      // 3. Resolve professionalId e nome padronizado
+      let professionalId = dto.professionalId || null;
+      let profissionalNome = dto.profissional;
+
+      if (!professionalId && dto.profissional) {
+        const foundProf = await tx.professional.findFirst({
+          where: { nome: { contains: dto.profissional, mode: "insensitive" } },
+        });
+        if (foundProf) {
+          professionalId = foundProf.id;
+          profissionalNome = foundProf.nome;
+        }
+      } else if (professionalId && !profissionalNome) {
+        const foundProf = await tx.professional.findUnique({ where: { id: professionalId } });
+        if (foundProf) {
+          profissionalNome = foundProf.nome;
+        }
+      }
+
+      let serviceId = dto.serviceId || null;
+      if (!serviceId && dto.procedimento) {
+        const foundSrv = await tx.service.findFirst({
+          where: { nome: { contains: dto.procedimento, mode: "insensitive" } },
+        });
+        if (foundSrv) serviceId = foundSrv.id;
+      }
+
+      // 4. BLINDAGEM CONTRA DOUBLE-BOOKING:
+      // Verifica agendamentos ativos existentes (AGENDADO ou CONFIRMADO) para o mesmo profissional na data
+      const existingAppointments = await tx.appointment.findMany({
+        where: {
+          data: dateObj,
+          status: { in: [StatusAppointment.AGENDADO, StatusAppointment.CONFIRMADO] },
+          OR: [
+            ...(professionalId ? [{ professionalId }] : []),
+            ...(profissionalNome ? [{ profissional: { equals: profissionalNome, mode: "insensitive" as const } }] : []),
+          ],
+        },
+        select: {
+          id: true,
+          horarioInicio: true,
+          horarioFim: true,
+          profissional: true,
+        },
+      });
+
+      // Aplica a regra matemática de sobreposição de intervalos:
+      // (novoInicio < existenteFim) E (novoFim > existenteInicio)
+      const conflict = existingAppointments.find((apt) => {
+        const aptStart = parseTimeToMinutes(apt.horarioInicio);
+        const aptEnd = parseTimeToMinutes(apt.horarioFim);
+        return startMinutes < aptEnd && endMinutes > aptStart;
+      });
+
+      if (conflict) {
+        throw new AppointmentConflictError(
+          `Conflito de agendamento: O profissional ${profissionalNome || dto.profissional} já possui consulta agendada entre ${conflict.horarioInicio} e ${conflict.horarioFim} nesta data.`
+        );
+      }
+
+      // 5. Busca ou cria o Lead atomicamente
       let lead = null;
       if (dto.leadId) {
         lead = await tx.lead.findUnique({ where: { id: dto.leadId } });
@@ -153,43 +333,14 @@ export class AppointmentService {
         });
       }
 
-      // 2. Resolve professionalId e serviceId para manter integridade
-      let professionalId = dto.professionalId || null;
-      if (!professionalId && dto.profissional) {
-        const foundProf = await tx.professional.findFirst({
-          where: { nome: { contains: dto.profissional, mode: "insensitive" } },
-        });
-        if (foundProf) professionalId = foundProf.id;
-      }
-
-      let serviceId = dto.serviceId || null;
-      if (!serviceId && dto.procedimento) {
-        const foundSrv = await tx.service.findFirst({
-          where: { nome: { contains: dto.procedimento, mode: "insensitive" } },
-        });
-        if (foundSrv) serviceId = foundSrv.id;
-      }
-
-      // 3. Calcula horarioFim padrão caso não fornecido (45 minutos de duração)
-      let horarioFim = dto.horarioFim;
-      if (!horarioFim && dto.horarioInicio) {
-        const [h, m] = dto.horarioInicio.split(":").map(Number);
-        const endMinutes = h * 60 + m + 45;
-        const endH = Math.floor(endMinutes / 60) % 24;
-        const endM = endMinutes % 60;
-        horarioFim = `${String(endH).padStart(2, "0")}:${String(endM).padStart(2, "0")}`;
-      }
-
-      const dateObj = this.parseDateStringToUTC(dto.data);
-
-      // 4. Cria o Appointment
+      // 6. Cria o Appointment
       const appointment = await tx.appointment.create({
         data: {
           leadId: lead.id,
           data: dateObj,
           horarioInicio: dto.horarioInicio,
-          horarioFim: horarioFim || "10:00",
-          profissional: dto.profissional,
+          horarioFim,
+          profissional: profissionalNome || dto.profissional,
           professionalId,
           servico: dto.procedimento,
           serviceId,
@@ -203,12 +354,12 @@ export class AppointmentService {
         },
       });
 
-      // 5. Registra ação de auditoria na AiActionLog
+      // 7. Registra ação de auditoria na AiActionLog
       await tx.aiActionLog.create({
         data: {
           tipo: "AGENDAMENTO",
           telefone: cleanTelefone,
-          detalhes: `Consulta criada para ${dto.data} às ${dto.horarioInicio} com ${dto.profissional}`,
+          detalhes: `Consulta criada para ${dto.data} das ${dto.horarioInicio} às ${horarioFim} com ${profissionalNome || dto.profissional}`,
         },
       });
 
@@ -251,35 +402,101 @@ export class AppointmentService {
 
   /**
    * Edita data, horário, serviço, profissional ou observações de um agendamento.
+   * Aplica validações de expediente, almoço e blindagem contra double-booking.
    */
   public static async updateAppointment(id: string, dto: UpdateAppointmentDTO) {
-    const dataToUpdate: any = {};
-
-    if (dto.data) {
-      dataToUpdate.data = this.parseDateStringToUTC(dto.data);
-    }
-    if (dto.horarioInicio) dataToUpdate.horarioInicio = dto.horarioInicio;
-    if (dto.horarioFim) dataToUpdate.horarioFim = dto.horarioFim;
-    if (dto.profissional) dataToUpdate.profissional = dto.profissional;
-    if (dto.professionalId !== undefined) dataToUpdate.professionalId = dto.professionalId;
-    if (dto.servico) dataToUpdate.servico = dto.servico;
-    if (dto.serviceId !== undefined) dataToUpdate.serviceId = dto.serviceId;
-    if (dto.observacoes !== undefined) dataToUpdate.observacoes = dto.observacoes;
-
-    const appointment = await prisma.appointment.update({
+    const current = await prisma.appointment.findUnique({
       where: { id },
-      data: dataToUpdate,
-      include: {
-        lead: true,
-        professional: true,
-        service: true,
-      },
+      include: { professional: true },
     });
 
-    return {
-      ...appointment,
-      data: appointment.data.toISOString().split("T")[0],
-    };
+    if (!current) {
+      throw new AppointmentValidationError("Agendamento não localizado para atualização.");
+    }
+
+    const targetDateStr = dto.data || current.data.toISOString().split("T")[0];
+    const targetHorarioInicio = dto.horarioInicio || current.horarioInicio;
+    const targetHorarioFim = dto.horarioFim || current.horarioFim;
+
+    // Validações de expediente, almoço, domingo e horário de término
+    const { dateObj, startMinutes, endMinutes } = this.validateScheduleRules(
+      targetDateStr,
+      targetHorarioInicio,
+      targetHorarioFim
+    );
+
+    return await prisma.$transaction(async (tx) => {
+      let professionalId = dto.professionalId !== undefined ? dto.professionalId : current.professionalId;
+      let profissionalNome = dto.profissional !== undefined ? dto.profissional : current.profissional;
+
+      if (dto.profissional && dto.professionalId === undefined) {
+        const foundProf = await tx.professional.findFirst({
+          where: { nome: { contains: dto.profissional, mode: "insensitive" } },
+        });
+        if (foundProf) {
+          professionalId = foundProf.id;
+          profissionalNome = foundProf.nome;
+        }
+      }
+
+      // Validação de double-booking contra outros agendamentos ativos (excluindo a si próprio)
+      const existingAppointments = await tx.appointment.findMany({
+        where: {
+          id: { not: id },
+          data: dateObj,
+          status: { in: [StatusAppointment.AGENDADO, StatusAppointment.CONFIRMADO] },
+          OR: [
+            ...(professionalId ? [{ professionalId }] : []),
+            ...(profissionalNome ? [{ profissional: { equals: profissionalNome, mode: "insensitive" as const } }] : []),
+          ],
+        },
+        select: {
+          id: true,
+          horarioInicio: true,
+          horarioFim: true,
+          profissional: true,
+        },
+      });
+
+      const conflict = existingAppointments.find((apt) => {
+        const aptStart = parseTimeToMinutes(apt.horarioInicio);
+        const aptEnd = parseTimeToMinutes(apt.horarioFim);
+        return startMinutes < aptEnd && endMinutes > aptStart;
+      });
+
+      if (conflict) {
+        throw new AppointmentConflictError(
+          `Conflito de agendamento: O profissional ${profissionalNome} já possui consulta marcada entre ${conflict.horarioInicio} e ${conflict.horarioFim} nesta data.`
+        );
+      }
+
+      const dataToUpdate: any = {
+        data: dateObj,
+        horarioInicio: targetHorarioInicio,
+        horarioFim: targetHorarioFim,
+        profissional: profissionalNome,
+        professionalId,
+      };
+
+      if (dto.servico) dataToUpdate.servico = dto.servico;
+      if (dto.serviceId !== undefined) dataToUpdate.serviceId = dto.serviceId;
+      if (dto.observacoes !== undefined) dataToUpdate.observacoes = dto.observacoes;
+
+      const appointment = await tx.appointment.update({
+        where: { id },
+        data: dataToUpdate,
+        include: {
+          lead: true,
+          professional: true,
+          service: true,
+        },
+      });
+
+      return {
+        ...appointment,
+        data: appointment.data.toISOString().split("T")[0],
+      };
+    });
   }
 
   /**
@@ -287,62 +504,164 @@ export class AppointmentService {
    */
   public static readonly CLINIC_HOURS = [
     "08:00",
+    "08:30",
     "09:00",
+    "09:30",
     "10:00",
+    "10:30",
     "11:00",
     "13:00",
+    "13:30",
     "14:00",
+    "14:30",
     "15:00",
+    "15:30",
     "16:00",
+    "16:30",
     "17:00",
   ];
 
   /**
    * Consulta horários disponíveis no banco para uma data específica (YYYY-MM-DD),
-   * normalizada para meio-dia UTC para coincidir exatamente com as datas persistidas.
+   * levando em conta a duração real do serviço e considerando vago se pelo menos
+   * um profissional ativo estiver livre no intervalo pretendido.
    */
   public static async consultarHorariosDisponiveis(params: {
     data: string;
     profissional?: string;
     professionalId?: string;
     servico?: string;
+    serviceId?: string;
   }): Promise<{
     data: string;
     horarios: string[];
     profissional?: string;
+    duracaoMinutos: number;
     mensagem: string;
   }> {
     const dataNormalized = this.parseDateStringToUTC(params.data);
 
-    const where: any = {
-      data: dataNormalized,
-      status: { not: StatusAppointment.CANCELADO },
-    };
-
-    if (params.professionalId) {
-      where.professionalId = params.professionalId;
-    } else if (params.profissional) {
-      where.profissional = { contains: params.profissional, mode: "insensitive" };
+    // 1. Bloqueio aos domingos
+    if (dataNormalized.getUTCDay() === 0) {
+      return {
+        data: params.data,
+        horarios: [],
+        profissional: params.profissional,
+        duracaoMinutos: 45,
+        mensagem: "A clínica não realiza atendimentos aos domingos. Por favor, escolha uma data entre segunda e sexta-feira.",
+      };
     }
 
-    const ocupados = await prisma.appointment.findMany({
-      where,
-      select: { horarioInicio: true },
+    // 2. Calcula a duração real do serviço pretendido
+    let duracaoMinutos = 45;
+    if (params.serviceId) {
+      const srv = await prisma.service.findUnique({ where: { id: params.serviceId } });
+      if (srv?.duracaoMinutos) duracaoMinutos = srv.duracaoMinutos;
+    } else if (params.servico) {
+      const srv = await prisma.service.findFirst({
+        where: { nome: { contains: params.servico, mode: "insensitive" } },
+      });
+      if (srv?.duracaoMinutos) duracaoMinutos = srv.duracaoMinutos;
+    }
+
+    // 3. Obtém profissionais ativos a avaliar
+    let activeProfessionals: Array<{ id: string; nome: string }> = [];
+    if (params.professionalId) {
+      const p = await prisma.professional.findUnique({ where: { id: params.professionalId } });
+      if (p) activeProfessionals = [p];
+    } else if (params.profissional) {
+      const list = await prisma.professional.findMany({
+        where: {
+          nome: { contains: params.profissional, mode: "insensitive" },
+          ativo: true,
+        },
+      });
+      if (list.length > 0) {
+        activeProfessionals = list;
+      } else {
+        activeProfessionals = [{ id: "", nome: params.profissional }];
+      }
+    } else {
+      activeProfessionals = await prisma.professional.findMany({
+        where: { ativo: true },
+      });
+      if (activeProfessionals.length === 0) {
+        activeProfessionals = [
+          { id: "camila", nome: "Dra. Camila Duarte" },
+          { id: "lucas", nome: "Dr. Lucas Ramos" },
+        ];
+      }
+    }
+
+    // 4. Busca todos os agendamentos ativos na data especificada
+    const activeAppointments = await prisma.appointment.findMany({
+      where: {
+        data: dataNormalized,
+        status: { in: [StatusAppointment.AGENDADO, StatusAppointment.CONFIRMADO] },
+      },
+      select: {
+        id: true,
+        horarioInicio: true,
+        horarioFim: true,
+        professionalId: true,
+        profissional: true,
+      },
     });
 
-    const horariosOcupados = new Set(ocupados.map((a) => a.horarioInicio));
-    const horariosLivres = this.CLINIC_HOURS.filter((h) => !horariosOcupados.has(h));
+    const LUNCH_START = 12 * 60; // 720 min (12:00)
+    const LUNCH_END = 13 * 60;   // 780 min (13:00)
+    const CLINIC_CLOSE = 18 * 60; // 1080 min (18:00)
 
-    const profissionalNome = params.profissional || "nossa equipe";
+    const horariosLivres: string[] = [];
+
+    // 5. Avalia cada slot candidato em relação à duração do serviço e expediente
+    for (const slot of this.CLINIC_HOURS) {
+      const slotStart = parseTimeToMinutes(slot);
+      const slotEnd = slotStart + duracaoMinutos;
+
+      // Não pode ultrapassar o fechamento da clínica (18:00)
+      if (slotEnd > CLINIC_CLOSE) continue;
+
+      // Não pode sobrepor o intervalo de almoço (12:00 às 13:00)
+      if (slotStart < LUNCH_END && slotEnd > LUNCH_START) continue;
+
+      // Se o paciente não selecionar um profissional específico, considera o horário vago
+      // se pelo menos UM profissional ativo estiver livre naquele intervalo.
+      const temProfissionalDisponivel = activeProfessionals.some((prof) => {
+        const temConflito = activeAppointments.some((apt) => {
+          const aptMatchesProf =
+            (prof.id && apt.professionalId === prof.id) ||
+            (apt.profissional && prof.nome && apt.profissional.toLowerCase().includes(prof.nome.toLowerCase())) ||
+            (prof.nome && apt.profissional && prof.nome.toLowerCase().includes(apt.profissional.toLowerCase()));
+
+          if (!aptMatchesProf) return false;
+
+          const aptStart = parseTimeToMinutes(apt.horarioInicio);
+          const aptEnd = parseTimeToMinutes(apt.horarioFim);
+
+          // Sobreposição: (slotStart < aptEnd) E (slotEnd > aptStart)
+          return slotStart < aptEnd && slotEnd > aptStart;
+        });
+
+        return !temConflito;
+      });
+
+      if (temProfissionalDisponivel) {
+        horariosLivres.push(slot);
+      }
+    }
+
+    const profissionalNome = params.profissional || (activeProfessionals.length === 1 ? activeProfessionals[0].nome : "nossa equipe");
     const mensagem =
       horariosLivres.length > 0
-        ? `Temos os seguintes horários disponíveis para ${params.data} com ${profissionalNome}: ${horariosLivres.join(", ")}.`
-        : `Infelizmente não temos horários disponíveis para ${params.data} com ${profissionalNome}. Gostaria de verificar outra data?`;
+        ? `Temos os seguintes horários disponíveis para ${params.data} com ${profissionalNome} (${duracaoMinutos} min): ${horariosLivres.join(", ")}.`
+        : `Infelizmente não temos horários disponíveis para ${params.data} com ${profissionalNome} para procedimento de ${duracaoMinutos} min. Gostaria de verificar outra data?`;
 
     return {
       data: params.data,
       horarios: horariosLivres,
       profissional: params.profissional,
+      duracaoMinutos,
       mensagem,
     };
   }

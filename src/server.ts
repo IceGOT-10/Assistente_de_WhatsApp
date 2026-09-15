@@ -9,7 +9,11 @@ import { QuickRepliesService } from "./services/quickReplies.service";
 import { MessageService } from "./services/message.service";
 import { AiConfigService } from "./services/aiConfig.service";
 import { DashboardService } from "./services/dashboard.service";
-import { AppointmentService } from "./services/appointment.service";
+import {
+  AppointmentService,
+  AppointmentConflictError,
+  AppointmentValidationError,
+} from "./services/appointment.service";
 import { ChatService } from "./services/chat.service";
 import { CustomerService } from "./services/customer.service";
 import { ClinicDataService } from "./services/clinicData.service";
@@ -71,9 +75,21 @@ app.post("/api/appointments", async (req, res) => {
   try {
     const appointment = await AppointmentService.createAppointment(req.body);
     res.status(201).json(appointment);
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof AppointmentConflictError) {
+      return res.status(409).json({
+        error: error.message,
+        code: "DOUBLE_BOOKING_CONFLICT",
+      });
+    }
+    if (error instanceof AppointmentValidationError) {
+      return res.status(400).json({
+        error: error.message,
+        code: "INVALID_SCHEDULE",
+      });
+    }
     console.error("Erro ao criar agendamento:", error);
-    res.status(500).json({ error: "Erro ao cadastrar agendamento" });
+    res.status(500).json({ error: error.message || "Erro ao cadastrar agendamento" });
   }
 });
 
@@ -94,9 +110,21 @@ app.put("/api/appointments/:id", async (req, res) => {
     const { id } = req.params;
     const updated = await AppointmentService.updateAppointment(id, req.body);
     res.json(updated);
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof AppointmentConflictError) {
+      return res.status(409).json({
+        error: error.message,
+        code: "DOUBLE_BOOKING_CONFLICT",
+      });
+    }
+    if (error instanceof AppointmentValidationError) {
+      return res.status(400).json({
+        error: error.message,
+        code: "INVALID_SCHEDULE",
+      });
+    }
     console.error("Erro ao editar agendamento:", error);
-    res.status(500).json({ error: "Erro ao salvar alterações do agendamento" });
+    res.status(500).json({ error: error.message || "Erro ao salvar alterações do agendamento" });
   }
 });
 
@@ -144,6 +172,17 @@ app.post("/api/chat/takeover/:telefone", async (req, res) => {
   } catch (error) {
     console.error("Erro ao assumir atendimento:", error);
     res.status(500).json({ error: "Erro ao transferir atendimento" });
+  }
+});
+
+app.post("/api/chat/resume/:telefone", async (req, res) => {
+  try {
+    const { telefone } = req.params;
+    const result = await ChatService.resume(telefone);
+    res.json(result);
+  } catch (error) {
+    console.error("Erro ao retomar atendimento da IA:", error);
+    res.status(500).json({ error: "Erro ao reativar assistente virtual" });
   }
 });
 
@@ -512,7 +551,7 @@ async function bootstrap() {
     if (quickReply) {
       let cleanReply = quickReply;
       if (quickReply.includes("[PAUSAR_IA]")) {
-        await LeadService.pausarIA(telefoneLimpo, 60);
+        await LeadService.pausarIA(telefoneLimpo, null);
         cleanReply = quickReply.replace("[PAUSAR_IA]", "").trim();
       }
 
@@ -542,12 +581,8 @@ async function bootstrap() {
         });
         console.log(`⏳ [Aviso de Espera Enviado para ${remoteJid}]`);
       }
-      await MessageService.salvarMensagem({
-        telefone: telefoneLimpo,
-        remoteJid,
-        texto: textoAviso,
-        remetente: MessageSender.IA,
-      });
+      // Observação anti-poluição: Não gravamos o aviso intermediário no MessageService
+      // para não contaminar a memória e o histórico contextual do Gemini.
     }, tempoLimiteMs);
 
     try {

@@ -166,6 +166,14 @@ export const api = {
     return response.data;
   },
 
+  async resumeSession(telefone: string): Promise<{ success: boolean; message: string }> {
+    const cleanTelefone = telefone.replace(/\D/g, "");
+    const response = await apiClient.post<{ success: boolean; message: string }>(
+      `/chat/resume/${cleanTelefone}`
+    );
+    return response.data;
+  },
+
   async markMessagesRead(telefone: string): Promise<{ success: boolean }> {
     const cleanTelefone = telefone.replace(/\D/g, "");
     const response = await apiClient.patch<{ success: boolean }>(`/chat/read/${cleanTelefone}`);

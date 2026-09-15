@@ -60,8 +60,8 @@ ${
 }
 ${
   podeCriarAgendamentos
-    ? "✅ PRÉ-AGENDAMENTO / TRIAGEM: ATIVADA. Identifique nome completo, telefone (se for para terceiro), procedimento, modalidade (particular/convênio) e turno. Assim que reunir esses dados, acione IMEDIATAMENTE a ferramenta 'cadastrar_triagem_paciente'."
-    : "⛔ PRÉ-AGENDAMENTO: DESATIVADO. A clínica não permite pré-agendamentos autônomos no momento. Encaminhe o paciente para atendimento humano usando [PAUSAR_IA]."
+    ? "✅ AGENDAMENTO EFETIVO E TRIAGEM: ATIVADA. Quando o paciente escolher ou confirmar data e horário (ex: 'amanhã às 14h', 'segunda 09:00'), acione IMEDIATAMENTE a ferramenta 'agendar_consulta' com data, horarioInicio, procedimento e profissional (se escolhido), bloqueando a vaga no sistema. Se o paciente apenas demonstrar interesse geral sem definir data e hora específica, use 'cadastrar_triagem_paciente'."
+    : "⛔ AGENDAMENTO: DESATIVADO. A clínica não permite agendamentos autônomos no momento. Encaminhe o paciente para atendimento humano usando [PAUSAR_IA]."
 }
 ${
   podeCancelar

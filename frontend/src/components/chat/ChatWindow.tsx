@@ -14,6 +14,7 @@ interface ChatWindowProps {
   messages: ChatMessage[];
   onSendMessage: (texto: string) => Promise<void>;
   onTakeover: () => Promise<void>;
+  onResume?: () => Promise<void>;
   isLoading?: boolean;
 }
 
@@ -22,11 +23,13 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   messages,
   onSendMessage,
   onTakeover,
+  onResume,
   isLoading = false,
 }) => {
   const [inputText, setInputText] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [isTakingOver, setIsTakingOver] = useState(false);
+  const [isResuming, setIsResuming] = useState(false);
   const [attachmentAlert, setAttachmentAlert] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -91,6 +94,18 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     }
   };
 
+  const handleResumeClick = async () => {
+    if (!onResume) return;
+    setIsResuming(true);
+    try {
+      await onResume();
+    } catch (error) {
+      console.error("Erro ao retomar IA:", error);
+    } finally {
+      setIsResuming(false);
+    }
+  };
+
   const formatMessageTime = (iso: string) => {
     try {
       return new Date(iso).toLocaleTimeString("pt-BR", {
@@ -134,13 +149,25 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           </div>
         </div>
 
-        {/* Botão Assumir Atendimento */}
-        {!activeConversation.iaPausada && (
+        {/* Ação de Controle da IA / Atendente */}
+        {activeConversation.iaPausada ? (
+          <button
+            type="button"
+            onClick={handleResumeClick}
+            disabled={isResuming}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer disabled:opacity-50 shrink-0"
+            title="Devolver atendimento para o assistente IA Sofia"
+          >
+            <Bot className="w-3.5 h-3.5" />
+            <span>{isResuming ? "Retomando IA..." : "Devolver para IA"}</span>
+          </button>
+        ) : (
           <button
             type="button"
             onClick={handleTakeoverClick}
             disabled={isTakingOver}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer disabled:opacity-50 shrink-0"
+            title="Pausar a IA e assumir conversa manualmente"
           >
             <UserCheck className="w-3.5 h-3.5" />
             <span>{isTakingOver ? "Pausando IA..." : "Assumir atendimento"}</span>

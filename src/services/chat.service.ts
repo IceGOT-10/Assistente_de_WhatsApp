@@ -1,4 +1,4 @@
-import { PrismaClient, MessageSender } from "@prisma/client";
+import { PrismaClient, MessageSender, StatusLead } from "@prisma/client";
 import { WhatsAppGateway } from "../gateway/whatsapp";
 import { MessageService } from "./message.service";
 import { LeadService } from "./lead.service";
@@ -183,20 +183,37 @@ export class ChatService {
       lida: true,
     });
 
-    // 3. Pausa a IA por 60 min automaticamente, pois um atendente humano respondeu
-    await LeadService.pausarIA(cleanTelefone, 60);
+    // 3. Pausa a IA INDEFINIDAMENTE pois um atendente humano respondeu diretamente
+    await LeadService.pausarIA(cleanTelefone, null);
+
+    // 4. Se o lead estiver como NOVO ou AGUARDANDO_CONFIRMACAO, atualiza para TRANSBORDO_HUMANO
+    await prisma.lead.updateMany({
+      where: {
+        telefone: cleanTelefone,
+        status: { in: [StatusLead.NOVO, StatusLead.AGUARDANDO_CONFIRMACAO] },
+      },
+      data: { status: StatusLead.TRANSBORDO_HUMANO },
+    });
 
     return message;
   }
 
   /**
-   * Intervenção humana: Atendente assume o atendimento e pausa a IA.
+   * Intervenção humana: Atendente assume o atendimento, pausa a IA indefinidamente
+   * e move o Lead imediatamente para TRANSBORDO_HUMANO no funil de vendas.
    */
   public static async takeover(telefone: string) {
     const cleanTelefone = telefone.replace(/\D/g, "");
 
-    await LeadService.pausarIA(cleanTelefone, 60);
+    // 1. Pausa a IA INDEFINIDAMENTE (pausadaAte = null) até ação explícita de retomada
+    await LeadService.pausarIA(cleanTelefone, null);
     await MessageService.registrarAcaoIa("TRANSBORDO", cleanTelefone, "Atendente assumiu a conversa");
+
+    // 2. Atualiza atomicamente o Lead no CRM para TRANSBORDO_HUMANO
+    await prisma.lead.updateMany({
+      where: { telefone: cleanTelefone },
+      data: { status: StatusLead.TRANSBORDO_HUMANO },
+    });
 
     const session = await prisma.sessionControl.findUnique({
       where: { telefone: cleanTelefone },
@@ -204,7 +221,7 @@ export class ChatService {
 
     const targetRemoteJid = session?.remoteJid || `${cleanTelefone}@s.whatsapp.net`;
 
-    // Registra aviso no chat
+    // 3. Registra aviso no chat
     const aviso = "👩‍💼 Um atendente da nossa recepção assumiu este atendimento. A assistente de IA foi pausada.";
     await MessageService.salvarMensagem({
       telefone: cleanTelefone,
@@ -216,7 +233,39 @@ export class ChatService {
 
     return {
       success: true,
-      message: `Atendimento assumido pela recepção para ${cleanTelefone}. IA pausada.`,
+      message: `Atendimento assumido pela recepção para ${cleanTelefone}. IA pausada indefinidamente.`,
+    };
+  }
+
+  /**
+   * Retomada da IA: Devolve o atendimento para a assistente virtual Sofia e limpa o bloqueio.
+   */
+  public static async resume(telefone: string) {
+    const cleanTelefone = telefone.replace(/\D/g, "");
+
+    // 1. Reativa a IA no controle de sessão
+    await LeadService.retomarIA(cleanTelefone);
+    await MessageService.registrarAcaoIa("RETOMADA_IA", cleanTelefone, "Recepção devolveu atendimento para a IA");
+
+    const session = await prisma.sessionControl.findUnique({
+      where: { telefone: cleanTelefone },
+    });
+
+    const targetRemoteJid = session?.remoteJid || `${cleanTelefone}@s.whatsapp.net`;
+
+    // 2. Registra aviso cordial no chat
+    const aviso = "🤖 O atendimento com a assistente virtual Sofia foi retomado. Como posso ajudar?";
+    await MessageService.salvarMensagem({
+      telefone: cleanTelefone,
+      remoteJid: targetRemoteJid,
+      texto: aviso,
+      remetente: MessageSender.IA,
+      lida: true,
+    });
+
+    return {
+      success: true,
+      message: `Atendimento devolvido para a assistente Sofia com sucesso para ${cleanTelefone}.`,
     };
   }
 

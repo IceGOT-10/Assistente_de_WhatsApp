@@ -1,10 +1,11 @@
-import { PrismaClient, MessageSender } from "@prisma/client";
+import { PrismaClient, MessageSender, StatusLead } from "@prisma/client";
 import { ENV } from "../config/env";
 import { buildDynamicSystemPrompt } from "./prompts/dynamicPrompt";
 import { cadastrarTriagemPacienteTool } from "./tools/triageTool";
 import {
   consultarHorariosDisponiveisTool,
   cancelarConsultaTool,
+  agendarConsultaTool,
 } from "./tools/scheduleTools";
 import { LeadService, TriagemData } from "../services/lead.service";
 import { AiConfigService } from "../services/aiConfig.service";
@@ -104,6 +105,7 @@ export class GeminiService {
       const activeTools: any[] = [];
       if (podeCriarAgendamentos) {
         activeTools.push(cadastrarTriagemPacienteTool);
+        activeTools.push(agendarConsultaTool);
       }
       if (podeConsultarHorarios) {
         activeTools.push(consultarHorariosDisponiveisTool);
@@ -170,6 +172,101 @@ export class GeminiService {
                 : "";
 
             return `Perfeito, ${args.nome_completo}! Já registrei sua solicitação para ${args.procedimento} (${modalidadeTexto}${turnoTexto}).\n\nNossa recepção entrará em contato em breve para confirmar o horário exato. Você gostaria de alterar alguma informação ou podemos encerrar por aqui?`;
+          }
+
+          // --- Tool: Agendar Consulta Efetiva ---
+          if (call.name === "agendar_consulta") {
+            if (!podeCriarAgendamentos) {
+              return "O agendamento automático pela assistente virtual está desativado no momento. Vou transferir seu atendimento para a recepção! [PAUSAR_IA]";
+            }
+
+            const args = (call.args as any) || {};
+            const targetPhone = (args.telefone && String(args.telefone).trim().length > 0)
+              ? String(args.telefone).replace(/\D/g, "")
+              : telefoneLimpo;
+
+            let nomePaciente = args.nome_completo;
+            if (!nomePaciente) {
+              const existingLead = await prisma.lead.findUnique({ where: { telefone: targetPhone } });
+              nomePaciente = existingLead?.nomeCompleto || `Paciente (${targetPhone})`;
+            }
+
+            const dataAgendamento = args.data;
+            const horarioInicio = args.horarioInicio || args.horario_inicio;
+            const procedimento = args.procedimento || "Avaliação Geral";
+            const profissional = args.profissional;
+            const professionalId = args.profissionalId || args.professionalId || null;
+
+            let resultadoAgendamento: any = null;
+
+            try {
+              const appointment = await AppointmentService.createAppointment({
+                nomeCompleto: nomePaciente,
+                telefone: targetPhone,
+                procedimento,
+                tipoAtendimento: args.tipo_atendimento === "CONVENIO" ? "CONVENIO" : "PARTICULAR",
+                nomeConvenio: args.nome_convenio || null,
+                data: dataAgendamento,
+                horarioInicio,
+                profissional: profissional || "Dra. Camila Duarte",
+                professionalId,
+              });
+
+              resultadoAgendamento = {
+                sucesso: true,
+                id: appointment.id,
+                data: appointment.data,
+                horarioInicio: appointment.horarioInicio,
+                horarioFim: appointment.horarioFim,
+                profissional: appointment.profissional,
+                procedimento: appointment.servico,
+                mensagem: `Consulta agendada com sucesso para ${appointment.data} das ${appointment.horarioInicio} às ${appointment.horarioFim} com ${appointment.profissional}.`,
+              };
+            } catch (scheduleErr: any) {
+              resultadoAgendamento = {
+                sucesso: false,
+                erro: scheduleErr.message || "Horário indisponível para este profissional.",
+                orientacao:
+                  "Informe educadamente ao paciente que este horário não está disponível ou é inválido e sugira outros horários disponíveis ou use consultar_horarios_disponiveis.",
+              };
+            }
+
+            if (response.candidates?.[0]?.content) {
+              try {
+                contents.push(response.candidates[0].content);
+                contents.push({
+                  role: "tool",
+                  parts: [
+                    {
+                      functionResponse: {
+                        name: "agendar_consulta",
+                        response: { output: resultadoAgendamento },
+                      },
+                    },
+                  ],
+                });
+
+                const secondTurn = await this.callWithRetry(ai, {
+                  model: "gemini-3.1-flash-lite",
+                  contents,
+                  config: {
+                    systemInstruction,
+                    ...(toolsConfig ? { tools: toolsConfig } : {}),
+                    temperature: 0.3,
+                  },
+                });
+
+                if (secondTurn?.text) {
+                  return secondTurn.text;
+                }
+              } catch (followUpError) {
+                console.warn("[GeminiService] Falha no second-turn da tool agendar_consulta:", followUpError);
+              }
+            }
+
+            return resultadoAgendamento.sucesso
+              ? `✅ Sua consulta para ${resultadoAgendamento.procedimento} foi agendada para ${resultadoAgendamento.data} às ${resultadoAgendamento.horarioInicio} com ${resultadoAgendamento.profissional}. Até logo!`
+              : `Desculpe, não conseguimos agendar para este horário: ${resultadoAgendamento.erro}. Gostaria de verificar outro horário disponível?`;
           }
 
           // --- Tool: Consultar Horários Disponíveis ---
@@ -287,7 +384,11 @@ export class GeminiService {
 
       // Trata gatilho de transbordo humano [PAUSAR_IA]
       if (reply.includes("[PAUSAR_IA]")) {
-        await LeadService.pausarIA(telefoneLimpo, 60);
+        await LeadService.pausarIA(telefoneLimpo, null);
+        await prisma.lead.updateMany({
+          where: { telefone: telefoneLimpo },
+          data: { status: StatusLead.TRANSBORDO_HUMANO },
+        });
         let cleanedReply = reply.replace("[PAUSAR_IA]", "").trim();
         if (!cleanedReply) {
           cleanedReply =
