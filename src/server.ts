@@ -1,11 +1,17 @@
-﻿import express from "express";
+import express from "express";
 import cors from "cors";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, MessageSender } from "@prisma/client";
 import { ENV } from "./config/env";
 import { WhatsAppGateway } from "./gateway/whatsapp";
 import { GeminiService } from "./ai/gemini.service";
 import { LeadService } from "./services/lead.service";
 import { QuickRepliesService } from "./services/quickReplies.service";
+import { MessageService } from "./services/message.service";
+import { AiConfigService } from "./services/aiConfig.service";
+import { DashboardService } from "./services/dashboard.service";
+import { AppointmentService } from "./services/appointment.service";
+import { ChatService } from "./services/chat.service";
+import { CustomerService } from "./services/customer.service";
 
 const prisma = new PrismaClient();
 const app = express();
@@ -15,6 +21,192 @@ app.use(express.json());
 
 app.get("/api/health", (req, res) => {
   res.json({ status: "online", clinic: ENV.CLINIC_NAME });
+});
+
+// ==================== APPOINTMENTS (AGENDA) ====================
+app.get("/api/appointments", async (req, res) => {
+  try {
+    const { startDate, endDate, profissional, status } = req.query;
+    const appointments = await AppointmentService.listAppointments({
+      startDate: startDate as string,
+      endDate: endDate as string,
+      profissional: profissional as string,
+      status: status as any,
+    });
+    res.json(appointments);
+  } catch (error) {
+    console.error("Erro ao listar agendamentos:", error);
+    res.status(500).json({ error: "Erro ao listar agendamentos" });
+  }
+});
+
+app.post("/api/appointments", async (req, res) => {
+  try {
+    const appointment = await AppointmentService.createAppointment(req.body);
+    res.status(201).json(appointment);
+  } catch (error) {
+    console.error("Erro ao criar agendamento:", error);
+    res.status(500).json({ error: "Erro ao cadastrar agendamento" });
+  }
+});
+
+app.patch("/api/appointments/:id/status", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    const updated = await AppointmentService.updateStatus(id, status);
+    res.json(updated);
+  } catch (error) {
+    console.error("Erro ao atualizar status do agendamento:", error);
+    res.status(500).json({ error: "Erro ao atualizar status do agendamento" });
+  }
+});
+
+app.put("/api/appointments/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updated = await AppointmentService.updateAppointment(id, req.body);
+    res.json(updated);
+  } catch (error) {
+    console.error("Erro ao editar agendamento:", error);
+    res.status(500).json({ error: "Erro ao salvar alterações do agendamento" });
+  }
+});
+
+// ==================== CHAT & WHATSAPP ====================
+app.get("/api/chat/conversations", async (req, res) => {
+  try {
+    const conversations = await ChatService.listConversations();
+    res.json(conversations);
+  } catch (error) {
+    console.error("Erro ao listar conversas:", error);
+    res.status(500).json({ error: "Erro ao listar conversas do WhatsApp" });
+  }
+});
+
+app.get("/api/chat/messages/:telefone", async (req, res) => {
+  try {
+    const { telefone } = req.params;
+    const messages = await ChatService.getMessages(telefone);
+    res.json(messages);
+  } catch (error) {
+    console.error("Erro ao buscar mensagens:", error);
+    res.status(500).json({ error: "Erro ao buscar histórico de mensagens" });
+  }
+});
+
+app.post("/api/chat/send", async (req, res) => {
+  try {
+    const { telefone, texto } = req.body;
+    if (!telefone || !texto) {
+      return res.status(400).json({ error: "Telefone e texto são obrigatórios" });
+    }
+    const sent = await ChatService.sendMessage(telefone, texto);
+    res.status(201).json(sent);
+  } catch (error) {
+    console.error("Erro ao enviar mensagem pelo atendente:", error);
+    res.status(500).json({ error: "Erro ao despachar mensagem pelo WhatsApp" });
+  }
+});
+
+app.post("/api/chat/takeover/:telefone", async (req, res) => {
+  try {
+    const { telefone } = req.params;
+    const result = await ChatService.takeover(telefone);
+    res.json(result);
+  } catch (error) {
+    console.error("Erro ao assumir atendimento:", error);
+    res.status(500).json({ error: "Erro ao transferir atendimento" });
+  }
+});
+
+app.patch("/api/chat/read/:telefone", async (req, res) => {
+  try {
+    const { telefone } = req.params;
+    await ChatService.markAsRead(telefone);
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Erro ao marcar mensagens como lidas:", error);
+    res.status(500).json({ error: "Erro ao atualizar status de leitura" });
+  }
+});
+
+// ==================== CLIENTES (CUSTOMERS) ====================
+app.get("/api/customers", async (req, res) => {
+  try {
+    const { page, limit, search } = req.query;
+    const result = await CustomerService.listCustomers({
+      page: page ? Number(page) : undefined,
+      limit: limit ? Number(limit) : undefined,
+      search: search as string,
+    });
+    res.json(result);
+  } catch (error) {
+    console.error("Erro ao listar clientes:", error);
+    res.status(500).json({ error: "Erro ao buscar lista de clientes" });
+  }
+});
+
+app.post("/api/customers", async (req, res) => {
+  try {
+    const customer = await CustomerService.createCustomer(req.body);
+    res.status(201).json(customer);
+  } catch (error) {
+    console.error("Erro ao cadastrar cliente:", error);
+    res.status(500).json({ error: "Erro ao cadastrar novo cliente" });
+  }
+});
+
+app.put("/api/customers/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updated = await CustomerService.updateCustomer(id, req.body);
+    res.json(updated);
+  } catch (error) {
+    console.error("Erro ao atualizar cliente:", error);
+    res.status(500).json({ error: "Erro ao atualizar dados do cliente" });
+  }
+});
+
+// ==================== CONFIGURAÇÕES DA IA ====================
+app.get("/api/ai/config", async (req, res) => {
+  try {
+    const config = await AiConfigService.getConfig();
+    res.json(config);
+  } catch (error) {
+    console.error("Erro ao buscar configurações da IA:", error);
+    res.status(500).json({ error: "Erro ao buscar parâmetros da IA" });
+  }
+});
+
+app.put("/api/ai/config", async (req, res) => {
+  try {
+    const updated = await AiConfigService.updateConfig(req.body);
+    res.json(updated);
+  } catch (error) {
+    console.error("Erro ao atualizar configurações da IA:", error);
+    res.status(500).json({ error: "Erro ao salvar parâmetros da IA" });
+  }
+});
+
+app.get("/api/dashboard/stats", async (req, res) => {
+  try {
+    const stats = await DashboardService.getStats();
+    res.json(stats);
+  } catch (error) {
+    console.error("Erro ao buscar estatísticas do dashboard:", error);
+    res.status(500).json({ error: "Erro ao buscar métricas do dashboard" });
+  }
+});
+
+app.get("/api/dashboard/upcoming", async (req, res) => {
+  try {
+    const upcoming = await DashboardService.getUpcomingAppointments();
+    res.json(upcoming);
+  } catch (error) {
+    console.error("Erro ao buscar próximos atendimentos:", error);
+    res.status(500).json({ error: "Erro ao buscar próximos atendimentos" });
+  }
 });
 
 app.get("/api/leads", async (req, res) => {
@@ -102,10 +294,24 @@ app.post("/api/test/simulate-message", async (req, res) => {
   const telefoneLimpo = remoteJid.replace("@s.whatsapp.net", "").replace("@lid", "");
   console.log(`\n📩 [Simulador] Mensagem Recebida de ${remoteJid}:\n${text}`);
 
+  // Grava mensagem recebida do paciente no banco
+  await MessageService.salvarMensagem({
+    telefone: telefoneLimpo,
+    remoteJid,
+    texto: text,
+    remetente: MessageSender.PACIENTE,
+  });
+
   const pausada = await LeadService.isIaPausada(telefoneLimpo);
   if (pausada) {
     const avisoPausa = "⚠️ Seu atendimento já foi transferido para nossa equipe de recepção. Um atendente humano responderá em breve!";
     console.log(`⏸️ [Simulador] Atendimento pausado para humano: ${telefoneLimpo}`);
+    await MessageService.salvarMensagem({
+      telefone: telefoneLimpo,
+      remoteJid,
+      texto: avisoPausa,
+      remetente: MessageSender.IA,
+    });
     return res.json({ reply: avisoPausa, source: "gemini" });
   }
 
@@ -119,12 +325,26 @@ app.post("/api/test/simulate-message", async (req, res) => {
 
     GeminiService.registrarNoHistorico(remoteJid, text, cleanReply);
     console.log(`⚡ [Simulador] Resposta Rápida:\n${cleanReply}\n`);
+    await MessageService.salvarMensagem({
+      telefone: telefoneLimpo,
+      remoteJid,
+      texto: cleanReply,
+      remetente: MessageSender.IA,
+    });
     return res.json({ reply: cleanReply, source: "quick_reply" });
   }
 
   try {
     const botReply = await GeminiService.processarMensagem(remoteJid, text);
     console.log(`🤖 [Simulador] Resposta Gemini:\n${botReply}\n`);
+    if (botReply) {
+      await MessageService.salvarMensagem({
+        telefone: telefoneLimpo,
+        remoteJid,
+        texto: botReply,
+        remetente: MessageSender.IA,
+      });
+    }
     return res.json({ reply: botReply, source: "gemini" });
   } catch (error) {
     console.error(`[Simulador] Erro ao processar mensagem de ${remoteJid}:`, error);
@@ -172,6 +392,10 @@ function iniciarMonitorDeInatividade() {
 }
 
 async function bootstrap() {
+  // Garante a configuração padrão da IA Sofia
+  await AiConfigService.ensureDefaultConfig();
+  console.log("⚙️ [AiConfig] Configuração padrão da assistente Sofia inicializada.");
+
   app.listen(ENV.PORT, () => {
     console.log(`🚀 [Servidor HTTP] Operando na porta ${ENV.PORT}`);
     iniciarMonitorDeInatividade();
@@ -181,6 +405,14 @@ async function bootstrap() {
     console.log(`\n📩 [Mensagem Recebida de ${remoteJid}]:\n${consolidatedText}`);
 
     const telefoneLimpo = remoteJid.replace("@s.whatsapp.net", "").replace("@lid", "");
+
+    // Persiste mensagem do paciente
+    await MessageService.salvarMensagem({
+      telefone: telefoneLimpo,
+      remoteJid,
+      texto: consolidatedText,
+      remetente: MessageSender.PACIENTE,
+    });
 
     const pausada = await LeadService.isIaPausada(telefoneLimpo);
     if (pausada) {
@@ -200,6 +432,13 @@ async function bootstrap() {
         console.log(`⚡ [Resposta Rápida Pré-Feita Enviada]:\n${cleanReply}\n`);
         GeminiService.registrarNoHistorico(remoteJid, consolidatedText, cleanReply);
       }
+
+      await MessageService.salvarMensagem({
+        telefone: telefoneLimpo,
+        remoteJid,
+        texto: cleanReply,
+        remetente: MessageSender.IA,
+      });
       return;
     }
 
@@ -207,21 +446,36 @@ async function bootstrap() {
     const tempoLimiteMs = 4000;
 
     timeoutAviso = setTimeout(async () => {
+      const textoAviso = "Só um momento, estou consultando as informações para você... ⏳";
       if (WhatsAppGateway.sock) {
         await WhatsAppGateway.sock.sendMessage(remoteJid, {
-          text: "Só um momento, estou consultando as informações para você... ⏳",
+          text: textoAviso,
         });
         console.log(`⏳ [Aviso de Espera Enviado para ${remoteJid}]`);
       }
+      await MessageService.salvarMensagem({
+        telefone: telefoneLimpo,
+        remoteJid,
+        texto: textoAviso,
+        remetente: MessageSender.IA,
+      });
     }, tempoLimiteMs);
 
     try {
       const botReply = await GeminiService.processarMensagem(remoteJid, consolidatedText);
       if (timeoutAviso) clearTimeout(timeoutAviso);
 
-      if (botReply && WhatsAppGateway.sock) {
-        await WhatsAppGateway.sock.sendMessage(remoteJid, { text: botReply });
-        console.log(`🤖 [Resposta Enviada]:\n${botReply}\n`);
+      if (botReply) {
+        if (WhatsAppGateway.sock) {
+          await WhatsAppGateway.sock.sendMessage(remoteJid, { text: botReply });
+          console.log(`🤖 [Resposta Enviada]:\n${botReply}\n`);
+        }
+        await MessageService.salvarMensagem({
+          telefone: telefoneLimpo,
+          remoteJid,
+          texto: botReply,
+          remetente: MessageSender.IA,
+        });
       }
     } catch (error) {
       if (timeoutAviso) clearTimeout(timeoutAviso);

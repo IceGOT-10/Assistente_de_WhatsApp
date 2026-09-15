@@ -25,6 +25,19 @@ enum StatusLead {
   TRANSBORDO_HUMANO
 }
 
+enum StatusAppointment {
+  AGENDADO
+  CONFIRMADO
+  CANCELADO
+  CONCLUIDO
+}
+
+enum MessageSender {
+  PACIENTE
+  IA
+  ATENDENTE
+}
+
 model Lead {
   id                 String            @id @default(uuid())
   nomeCompleto       String
@@ -34,15 +47,74 @@ model Lead {
   nomeConvenio       String?
   periodoPreferencia TurnoPreferencia? @default(QUALQUER)
   status             StatusLead        @default(NOVO)
+  observacoes        String?           @db.Text
   createdAt          DateTime          @default(now())
   updatedAt          DateTime          @updatedAt
+
+  appointments       Appointment[]
+  messages           Message[]
 }
 
 model SessionControl {
   id               String    @id @default(uuid())
   telefone         String    @unique
+  remoteJid        String?
   iaPausada        Boolean   @default(false)
   pausadaAte       DateTime?
   ultimaInteracao  DateTime  @default(now())
   atendimentoAtivo Boolean   @default(true)
+}
+
+model Appointment {
+  id            String            @id @default(uuid())
+  leadId        String
+  lead          Lead              @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  data          DateTime          @db.Date
+  horarioInicio String
+  horarioFim    String
+  profissional  String
+  servico       String
+  status        StatusAppointment @default(AGENDADO)
+  observacoes   String?           @db.Text
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  @@index([data])
+  @@index([profissional])
+}
+
+model Message {
+  id        String        @id @default(uuid())
+  telefone  String
+  remoteJid String
+  leadId    String?
+  lead      Lead?         @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  texto     String        @db.Text
+  remetente MessageSender
+  lida      Boolean       @default(false)
+  createdAt DateTime      @default(now())
+
+  @@index([telefone])
+  @@index([remoteJid])
+  @@index([createdAt])
+}
+
+model AiConfig {
+  id                 String   @id @default("default")
+  iaAtiva            Boolean  @default(true)
+  nomeAssistente     String   @default("Sofia")
+  mensagemInicial    String   @db.Text
+  permissoes         Json
+  gatilhosTransbordo Json
+  updatedAt          DateTime @updatedAt
+}
+
+model AiActionLog {
+  id        String   @id @default(uuid())
+  tipo      String
+  telefone  String
+  detalhes  String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
 }

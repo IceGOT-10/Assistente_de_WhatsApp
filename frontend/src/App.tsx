@@ -1,60 +1,34 @@
-import { useEffect, useState, useMemo, useCallback } from "react";
-import { Header } from "./components/Header";
-import { StatsCards } from "./components/StatsCards";
-import { KanbanBoard } from "./components/KanbanBoard";
-import { ClinicCalendar } from "./components/ClinicCalendar";
+import { useEffect, useState, useCallback } from "react";
+import { Sidebar } from "./components/layout/Sidebar";
+import { Topbar } from "./components/layout/Topbar";
 import { LeadDetailsModal } from "./components/LeadDetailsModal";
 import { ScheduleModal } from "./components/ScheduleModal";
 import { ToastContainer } from "./components/Toast";
 import { useTheme } from "./hooks/useTheme";
+import { useNavigation } from "./hooks/useNavigation";
 import { api } from "./services/api";
 import type {
   Lead,
   LeadStatus,
-  TipoAtendimento,
-  DashboardStats,
   ToastMessage,
-  ViewMode,
   UpdateLeadDTO,
 } from "./types/lead";
-import { Loader2, SearchX } from "lucide-react";
-
-const LOCAL_STORAGE_LEADS_KEY = "odontoprime_leads_ext";
-
-function getStoredLeadsExt(): Record<string, Partial<Lead>> {
-  try {
-    const data = localStorage.getItem(LOCAL_STORAGE_LEADS_KEY);
-    return data ? JSON.parse(data) : {};
-  } catch {
-    return {};
-  }
-}
-
-function saveStoredLeadExt(id: string, ext: Partial<Lead>) {
-  try {
-    const current = getStoredLeadsExt();
-    current[id] = { ...(current[id] || {}), ...ext };
-    localStorage.setItem(LOCAL_STORAGE_LEADS_KEY, JSON.stringify(current));
-  } catch (e) {
-    console.error("Erro ao salvar dados estendidos do lead no cache:", e);
-  }
-}
+import { DashboardView } from "./components/dashboard/DashboardView";
+import { CalendarView } from "./components/calendar/CalendarView";
+import { ChatView } from "./components/chat/ChatView";
+import { CustomersView } from "./components/customers/CustomersView";
+import { AiSettingsView } from "./components/ai-settings/AiSettingsView";
+import { BarChart3, TrendingUp, Users, CalendarCheck, Sparkles } from "lucide-react";
 
 export default function App() {
   const { theme, setTheme } = useTheme();
-  const [viewMode, setViewMode] = useState<ViewMode>("kanban");
+  const { activeTab, setActiveTab } = useNavigation();
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
 
   const [leads, setLeads] = useState<Lead[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
 
-  // Filtros
-  const [searchTerm, setSearchTerm] = useState<string>("");
-  const [tipoFilter, setTipoFilter] = useState<"ALL" | TipoAtendimento>("ALL");
-
-  // Modal de Detalhes & Agendamento & Toasts
+  // Modais de Detalhes & Agendamento & Notificações Toasts
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [leadToSchedule, setLeadToSchedule] = useState<Lead | null>(null);
@@ -74,61 +48,50 @@ export default function App() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
-  // Carrega leads da API mesclando com o cache local para campos adicionais (observações, agendamentos)
-  const mergeLeadsWithExt = (serverLeads: Lead[]): Lead[] => {
-    const ext = getStoredLeadsExt();
-    return serverLeads.map((l) => {
-      const stored = ext[l.id];
-      if (stored) {
-        return {
-          ...l,
-          observacoes: stored.observacoes ?? l.observacoes,
-          dataAgendamento: stored.dataAgendamento ?? l.dataAgendamento,
-          horarioAgendado: stored.horarioAgendado ?? l.horarioAgendado,
-        };
-      }
-      return l;
-    });
+  const carregarLeads = useCallback(async () => {
+    try {
+      const dados = await api.getLeads();
+      setLeads(dados);
+    } catch (err) {
+      console.error("Erro ao carregar leads:", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    carregarLeads();
+  }, [carregarLeads]);
+
+  // Abertura de prontuário por telefone (acionado pelo chat ou tela de clientes)
+  const abrirDetalhesPorTelefone = (telefone: string) => {
+    const clean = telefone.replace(/\D/g, "");
+    const found = leads.find(
+      (l) =>
+        l.telefone.replace(/\D/g, "").includes(clean) ||
+        clean.includes(l.telefone.replace(/\D/g, ""))
+    );
+    if (found) {
+      setSelectedLead(found);
+      setIsModalOpen(true);
+    } else {
+      api.getLeads().then((allLeads) => {
+        setLeads(allLeads);
+        const matching = allLeads.find(
+          (l) =>
+            l.telefone.replace(/\D/g, "").includes(clean) ||
+            clean.includes(l.telefone.replace(/\D/g, ""))
+        );
+        if (matching) {
+          setSelectedLead(matching);
+          setIsModalOpen(true);
+        }
+      });
+    }
   };
 
-  const carregarLeads = useCallback(
-    async (manual: boolean = false) => {
-      if (manual) setIsRefreshing(true);
-      try {
-        const dados = await api.getLeads();
-        const merged = mergeLeadsWithExt(dados);
-        setLeads(merged);
-        setLastUpdated(new Date());
-        if (manual) {
-          addToast({
-            type: "success",
-            title: "Dados sincronizados",
-            message: "Fila de triagem e agenda atualizadas com sucesso.",
-          });
-        }
-      } catch (err) {
-        console.error("Erro ao carregar leads:", err);
-        if (manual) {
-          addToast({
-            type: "error",
-            title: "Falha de conexão",
-            message: "Não foi possível sincronizar com o servidor da clínica.",
-          });
-        }
-      } finally {
-        setLoading(false);
-        if (manual) setIsRefreshing(false);
-      }
-    },
-    [addToast]
-  );
-
-  // Mover etapa do lead
   const moverStatus = async (id: string, novoStatus: LeadStatus) => {
     const leadAlvo = leads.find((l) => l.id === id);
     if (!leadAlvo || leadAlvo.status === novoStatus) return;
 
-    // Se estiver movendo para AGENDADO e não tiver data/hora, abre o modal de agendamento
     if (novoStatus === "AGENDADO" && !leadAlvo.dataAgendamento) {
       setLeadToSchedule(leadAlvo);
       setIsScheduleModalOpen(true);
@@ -137,106 +100,81 @@ export default function App() {
 
     try {
       setUpdatingId(id);
-      // Atualização otimista
       setLeads((prev) =>
         prev.map((l) => (l.id === id ? { ...l, status: novoStatus } : l))
       );
 
       if (selectedLead && selectedLead.id === id) {
-        setSelectedLead((prev) =>
-          prev ? { ...prev, status: novoStatus } : null
-        );
+        setSelectedLead((prev) => (prev ? { ...prev, status: novoStatus } : null));
       }
 
       await api.updateLeadStatus(id, novoStatus);
 
       addToast({
         type: "success",
-        title: "Etapa atualizada",
-        message: `${leadAlvo.nomeCompleto} movido para ${getStatusLabel(
-          novoStatus
-        )}.`,
+        title: "Status atualizado",
+        message: `${leadAlvo.nomeCompleto} atualizado com sucesso.`,
       });
     } catch (err) {
-      console.error("Falha ao atualizar status:", err);
+      console.error("Erro ao mover status:", err);
+      setLeads((prev) =>
+        prev.map((l) => (l.id === id ? { ...l, status: leadAlvo.status } : l))
+      );
       addToast({
         type: "error",
-        title: "Erro ao mover lead",
-        message: "Ocorreu uma falha na atualização. Revertendo alteração.",
+        title: "Erro na atualização",
+        message: "Não foi possível sincronizar a alteração.",
       });
-      carregarLeads();
     } finally {
       setUpdatingId(null);
     }
   };
 
-  // Salvar edições do lead
-  const salvarLead = async (id: string, data: UpdateLeadDTO) => {
+  const resetarSessao = async (id: string) => {
+    const leadAlvo = leads.find((l) => l.id === id);
+    if (!leadAlvo) return;
+
     try {
       setUpdatingId(id);
+      await api.resetSession(id);
+      await carregarLeads();
 
-      // Persiste campos extras em cache local
-      saveStoredLeadExt(id, {
-        observacoes: data.observacoes,
-        dataAgendamento: data.dataAgendamento,
-        horarioAgendado: data.horarioAgendado,
+      addToast({
+        type: "info",
+        title: "Sessão reiniciada",
+        message: `A assistente Sofia reassumiu o contato de ${leadAlvo.nomeCompleto}.`,
       });
+    } catch (err) {
+      console.error("Erro ao resetar sessão:", err);
+      addToast({
+        type: "error",
+        title: "Erro ao resetar",
+        message: "Não foi possível reativar a IA para este paciente.",
+      });
+    } finally {
+      setUpdatingId(null);
+    }
+  };
 
-      // Atualização otimista
-      setLeads((prev) =>
-        prev.map((l) =>
-          l.id === id
-            ? {
-                ...l,
-                ...data,
-                nomeCompleto: data.nomeCompleto ?? l.nomeCompleto,
-                telefone: data.telefone ?? l.telefone,
-                procedimento: data.procedimento ?? l.procedimento,
-                tipoAtendimento: data.tipoAtendimento ?? l.tipoAtendimento,
-                nomeConvenio: data.nomeConvenio !== undefined ? data.nomeConvenio : l.nomeConvenio,
-                periodoPreferencia: data.periodoPreferencia !== undefined ? data.periodoPreferencia : l.periodoPreferencia,
-                observacoes: data.observacoes !== undefined ? data.observacoes : l.observacoes,
-                dataAgendamento: data.dataAgendamento !== undefined ? data.dataAgendamento : l.dataAgendamento,
-                horarioAgendado: data.horarioAgendado !== undefined ? data.horarioAgendado : l.horarioAgendado,
-              }
-            : l
-        )
-      );
+  const salvarLead = async (id: string, dto: UpdateLeadDTO) => {
+    try {
+      setUpdatingId(id);
+      const atualizado = await api.updateLead(id, dto);
 
-      if (selectedLead && selectedLead.id === id) {
-        setSelectedLead((prev) =>
-          prev
-            ? {
-                ...prev,
-                ...data,
-                nomeCompleto: data.nomeCompleto ?? prev.nomeCompleto,
-                telefone: data.telefone ?? prev.telefone,
-                procedimento: data.procedimento ?? prev.procedimento,
-                tipoAtendimento: data.tipoAtendimento ?? prev.tipoAtendimento,
-                nomeConvenio: data.nomeConvenio !== undefined ? data.nomeConvenio : prev.nomeConvenio,
-                periodoPreferencia: data.periodoPreferencia !== undefined ? data.periodoPreferencia : prev.periodoPreferencia,
-                observacoes: data.observacoes !== undefined ? data.observacoes : prev.observacoes,
-                dataAgendamento: data.dataAgendamento !== undefined ? data.dataAgendamento : prev.dataAgendamento,
-                horarioAgendado: data.horarioAgendado !== undefined ? data.horarioAgendado : prev.horarioAgendado,
-              }
-            : null
-        );
-      }
-
-      // Chamada à API
-      await api.updateLead(id, data);
+      setLeads((prev) => prev.map((l) => (l.id === id ? atualizado : l)));
+      setSelectedLead(atualizado);
 
       addToast({
         type: "success",
-        title: "Cadastro atualizado",
-        message: "As informações do paciente foram salvas com sucesso.",
+        title: "Dados atualizados",
+        message: "Informações do paciente salvas com sucesso.",
       });
     } catch (err) {
-      console.error("Erro ao salvar lead:", err);
+      console.error("Erro ao salvar dados do lead:", err);
       addToast({
         type: "error",
         title: "Erro ao salvar",
-        message: "Não foi possível salvar as alterações no servidor.",
+        message: "Não foi possível persistir as alterações.",
       });
       throw err;
     } finally {
@@ -244,304 +182,190 @@ export default function App() {
     }
   };
 
-  // Confirmar agendamento de data e horário
   const confirmarAgendamento = async (
-    leadId: string,
-    dataAgendamento: string,
-    horarioAgendado: string,
+    id: string,
+    dataStr: string,
+    horarioStr: string,
     observacoes?: string
   ) => {
     try {
-      setUpdatingId(leadId);
-
-      // Salva no cache
-      saveStoredLeadExt(leadId, {
-        dataAgendamento,
-        horarioAgendado,
+      setUpdatingId(id);
+      const atualizado = await api.updateLead(id, {
+        status: "AGENDADO",
+        dataAgendamento: dataStr,
+        horarioAgendado: horarioStr,
         observacoes,
       });
 
-      // Atualiza localmente
-      setLeads((prev) =>
-        prev.map((l) =>
-          l.id === leadId
-            ? {
-                ...l,
-                status: "AGENDADO",
-                dataAgendamento,
-                horarioAgendado,
-                observacoes: observacoes ?? l.observacoes,
-              }
-            : l
-        )
-      );
+      setLeads((prev) => prev.map((l) => (l.id === id ? atualizado : l)));
 
-      if (selectedLead && selectedLead.id === leadId) {
-        setSelectedLead((prev) =>
-          prev
-            ? {
-                ...prev,
-                status: "AGENDADO",
-                dataAgendamento,
-                horarioAgendado,
-                observacoes: observacoes ?? prev.observacoes,
-              }
-            : null
-        );
+      if (selectedLead && selectedLead.id === id) {
+        setSelectedLead(atualizado);
       }
 
-      // Envia atualização para a API
-      await api.updateLead(leadId, {
-        dataAgendamento,
-        horarioAgendado,
-        observacoes,
-      });
-      await api.updateLeadStatus(leadId, "AGENDADO");
+      setIsScheduleModalOpen(false);
+      setLeadToSchedule(null);
 
       addToast({
         type: "success",
-        title: "Consulta Agendada",
-        message: `Agendamento marcado para ${dataAgendamento} às ${horarioAgendado}.`,
+        title: "Consulta Agendada!",
+        message: `${atualizado.nomeCompleto} agendado para ${dataStr} às ${horarioStr}.`,
       });
     } catch (err) {
-      console.error("Erro ao agendar consulta:", err);
+      console.error("Erro ao confirmar agendamento:", err);
       addToast({
         type: "error",
-        title: "Erro no agendamento",
-        message: "Ocorreu um erro ao salvar o horário do agendamento.",
+        title: "Erro ao agendar",
+        message: "Não foi possível confirmar o agendamento.",
       });
     } finally {
       setUpdatingId(null);
     }
   };
 
-  // Reset de sessão
-  const resetarSessao = async (telefone: string) => {
-    try {
-      const res = await api.resetSession(telefone);
-      addToast({
-        type: "success",
-        title: "Sessão reiniciada",
-        message: res.message || "A pausa e a IA foram liberadas no WhatsApp.",
-      });
-    } catch (err) {
-      console.error("Erro ao resetar atendimento:", err);
-      addToast({
-        type: "error",
-        title: "Falha no reset",
-        message: "Não foi possível reiniciar o atendimento.",
-      });
-    }
-  };
-
-  const abrirDetalhes = (lead: Lead) => {
-    setSelectedLead(lead);
-    setIsModalOpen(true);
-  };
-
-  const fecharDetalhes = () => {
-    setIsModalOpen(false);
-    setSelectedLead(null);
-  };
-
-  const abrirAgendamento = (lead: Lead) => {
-    setLeadToSchedule(lead);
-    setIsScheduleModalOpen(true);
-  };
-
-  const fecharAgendamento = () => {
-    setIsScheduleModalOpen(false);
-    setLeadToSchedule(null);
-  };
-
-  // Polling automático a cada 8 segundos
-  useEffect(() => {
-    let ativo = true;
-
-    const sincronizar = async () => {
-      try {
-        const dados = await api.getLeads();
-        if (ativo) {
-          const merged = mergeLeadsWithExt(dados);
-          setLeads(merged);
-          setLastUpdated(new Date());
-        }
-      } catch (err) {
-        console.error("Erro ao sincronizar leads:", err);
-      } finally {
-        if (ativo) {
-          setLoading(false);
-        }
-      }
-    };
-
-    sincronizar();
-    const intervalo = setInterval(sincronizar, 8000);
-    return () => {
-      ativo = false;
-      clearInterval(intervalo);
-    };
-  }, []);
-
-  // Cálculo de Métricas e Estatísticas
-  const stats: DashboardStats = useMemo(() => {
-    const totalLeads = leads.length;
-    const aguardandoConfirmacao = leads.filter(
-      (l) => l.status === "AGUARDANDO_CONFIRMACAO"
-    ).length;
-    const agendados = leads.filter((l) => l.status === "AGENDADO").length;
-    const novosLeads = leads.filter((l) => l.status === "NOVO").length;
-    const transbordoHumano = leads.filter(
-      (l) => l.status === "TRANSBORDO_HUMANO"
-    ).length;
-    const taxaConversao =
-      totalLeads > 0 ? (agendados / totalLeads) * 100 : 0;
-
-    return {
-      totalLeads,
-      aguardandoConfirmacao,
-      agendados,
-      taxaConversao,
-      novosLeads,
-      transbordoHumano,
-    };
-  }, [leads]);
-
-  // Filtros de busca e tipo de atendimento
-  const leadsFiltrados = useMemo(() => {
-    return leads.filter((lead) => {
-      // Filtro por tipo de atendimento
-      if (tipoFilter !== "ALL" && lead.tipoAtendimento !== tipoFilter) {
-        return false;
-      }
-
-      // Filtro por busca textual
-      if (searchTerm.trim() !== "") {
-        const term = searchTerm.toLowerCase();
-        const nome = (lead.nomeCompleto || "").toLowerCase();
-        const tel = (lead.telefone || "").replace(/\D/g, "");
-        const proc = (lead.procedimento || "").toLowerCase();
-        const conv = (lead.nomeConvenio || "").toLowerCase();
-        const obs = (lead.observacoes || "").toLowerCase();
-
-        return (
-          nome.includes(term) ||
-          tel.includes(term.replace(/\D/g, "")) ||
-          proc.includes(term) ||
-          conv.includes(term) ||
-          obs.includes(term)
-        );
-      }
-
-      return true;
-    });
-  }, [leads, searchTerm, tipoFilter]);
+  // Contagem de atendimentos que requerem intervenção humana
+  const unreadCount = leads.filter((l) => l.status === "TRANSBORDO_HUMANO").length;
 
   return (
-    <div className="min-h-screen bg-slate-50/70 dark:bg-slate-950 text-slate-800 dark:text-slate-100 flex flex-col font-sans selection:bg-indigo-500 selection:text-white transition-colors duration-200">
-      {/* Header Corporativo com Alternador de Visualização e Tema */}
-      <Header
-        onRefresh={() => carregarLeads(true)}
-        isRefreshing={isRefreshing}
-        lastUpdated={lastUpdated}
-        searchTerm={searchTerm}
-        onSearchChange={setSearchTerm}
-        tipoFilter={tipoFilter}
-        onTipoFilterChange={setTipoFilter}
-        totalLeads={leads.length}
-        viewMode={viewMode}
-        onViewModeChange={setViewMode}
-        theme={theme}
-        onThemeChange={setTheme}
+    <div className="min-h-screen bg-slate-50/70 dark:bg-slate-950 text-slate-800 dark:text-slate-100 flex font-sans selection:bg-indigo-500 selection:text-white transition-colors duration-200 ease-in-out">
+      {/* 1. Sidebar Fixa com Marca Oficial OdontoPrime */}
+      <Sidebar
+        activeTab={activeTab}
+        onSelectTab={setActiveTab}
+        unreadMessagesCount={unreadCount}
+        isOpenMobile={isMobileSidebarOpen}
+        onCloseMobile={() => setIsMobileSidebarOpen(false)}
       />
 
-      {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
-        {/* KPI / Stats Cards */}
-        <StatsCards stats={stats} />
+      {/* 2. Conteúdo Principal à Direita da Sidebar */}
+      <div className="flex-1 flex flex-col min-w-0 lg:pl-64">
+        {/* Topbar com Indicador Reativo de Conexão e Seletor de Tema */}
+        <Topbar
+          theme={theme}
+          onThemeChange={setTheme}
+          onOpenMobileMenu={() => setIsMobileSidebarOpen(true)}
+        />
 
-        {/* Loading State Inicial */}
-        {loading ? (
-          <div className="flex flex-col items-center justify-center py-32 text-slate-400 dark:text-slate-500 gap-3">
-            <Loader2 className="w-8 h-8 text-indigo-600 dark:text-indigo-400 animate-spin" />
-            <span className="text-sm font-semibold text-slate-600 dark:text-slate-300">
-              Carregando painel de triagem da clínica...
-            </span>
-          </div>
-        ) : leadsFiltrados.length === 0 && searchTerm ? (
-          /* Estado de Busca Sem Resultados */
-          <div className="flex flex-col items-center justify-center py-24 px-4 text-center bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs transition-colors">
-            <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-400 dark:text-slate-500 mb-3">
-              <SearchX className="w-6 h-6 stroke-[1.8]" />
+        {/* 3. Área de Conteúdo da Tela Selecionada com Transições Nativas Tailwind v4 */}
+        <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto transition-all duration-200 ease-in-out">
+          {activeTab === "inicio" && (
+            <DashboardView
+              onNavigateToAgenda={() => setActiveTab("agenda")}
+              onNavigateToChat={() => setActiveTab("atendimento")}
+            />
+          )}
+
+          {activeTab === "agenda" && <CalendarView />}
+
+          {activeTab === "atendimento" && (
+            <ChatView onEditCustomer={abrirDetalhesPorTelefone} />
+          )}
+
+          {activeTab === "clientes" && (
+            <CustomersView onOpenDetails={abrirDetalhesPorTelefone} />
+          )}
+
+          {activeTab === "relatorios" && (
+            <div className="space-y-6 transition-all duration-200 ease-in-out">
+              <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/80 dark:border-slate-800 p-6 shadow-xs">
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="w-10 h-10 rounded-xl bg-amber-50 dark:bg-amber-950/60 text-amber-600 flex items-center justify-center">
+                    <BarChart3 className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-black text-slate-900 dark:text-white">
+                      Relatórios e Métricas de Conversão
+                    </h2>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Desempenho operacional da recepção e taxa de conversão da IA Sofia.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
+                  <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
+                    <div className="flex items-center justify-between text-slate-400 mb-2">
+                      <span className="text-xs font-bold uppercase tracking-wider">Conversão de Leads</span>
+                      <TrendingUp className="w-4 h-4 text-emerald-500" />
+                    </div>
+                    <span className="text-2xl font-black text-slate-900 dark:text-white">
+                      {leads.length > 0
+                        ? `${Math.round((leads.filter((l) => l.status === "AGENDADO").length / leads.length) * 100)}%`
+                        : "0%"}
+                    </span>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      Leads convertidos em consultas confirmadas
+                    </p>
+                  </div>
+
+                  <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
+                    <div className="flex items-center justify-between text-slate-400 mb-2">
+                      <span className="text-xs font-bold uppercase tracking-wider">Total de Pacientes</span>
+                      <Users className="w-4 h-4 text-indigo-500" />
+                    </div>
+                    <span className="text-2xl font-black text-slate-900 dark:text-white">
+                      {leads.length}
+                    </span>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      Contatos triados na base de dados
+                    </p>
+                  </div>
+
+                  <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
+                    <div className="flex items-center justify-between text-slate-400 mb-2">
+                      <span className="text-xs font-bold uppercase tracking-wider">Consultas Marcadas</span>
+                      <CalendarCheck className="w-4 h-4 text-sky-500" />
+                    </div>
+                    <span className="text-2xl font-black text-slate-900 dark:text-white">
+                      {leads.filter((l) => l.status === "AGENDADO").length}
+                    </span>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      Agendamentos finalizados
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-6 p-4 rounded-2xl bg-linear-to-r from-indigo-50/50 to-purple-50/50 dark:from-indigo-950/20 dark:to-purple-950/20 border border-indigo-100 dark:border-indigo-900/50 flex items-center gap-3">
+                  <Sparkles className="w-5 h-5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                  <p className="text-xs text-slate-600 dark:text-slate-300">
+                    A assistente Sofia realizou atendimentos com respostas instantâneas, reduzindo o tempo médio de espera dos pacientes na recepção para menos de 5 segundos.
+                  </p>
+                </div>
+              </div>
             </div>
-            <h3 className="text-base font-bold text-slate-800 dark:text-slate-100">
-              Nenhum paciente encontrado
-            </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mt-1 mb-4">
-              Não encontramos nenhum lead correspondente à busca "{searchTerm}".
-              Tente pesquisar por outro nome, telefone ou procedimento.
-            </p>
-            <button
-              onClick={() => setSearchTerm("")}
-              className="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
-            >
-              Limpar busca
-            </button>
-          </div>
-        ) : viewMode === "kanban" ? (
-          /* Visão Kanban */
-          <KanbanBoard
-            leads={leadsFiltrados}
-            onUpdateStatus={moverStatus}
-            onResetSession={resetarSessao}
-            onOpenDetails={abrirDetalhes}
-            updatingId={updatingId}
-          />
-        ) : (
-          /* Visão Calendário da Clínica */
-          <ClinicCalendar
-            leads={leadsFiltrados}
-            onOpenDetails={abrirDetalhes}
-            onOpenScheduleModal={abrirAgendamento}
-          />
-        )}
-      </main>
+          )}
 
-      {/* Modal de Detalhes do Lead (Edição Completa) */}
+          {activeTab === "configuracoes" && <AiSettingsView />}
+        </main>
+      </div>
+
+      {/* Modais Globais de Detalhes e Agendamento */}
       <LeadDetailsModal
         lead={selectedLead}
         isOpen={isModalOpen}
-        onClose={fecharDetalhes}
+        onClose={() => {
+          setIsModalOpen(false);
+          setSelectedLead(null);
+        }}
         onUpdateStatus={moverStatus}
         onResetSession={resetarSessao}
         onSaveLead={salvarLead}
         isUpdating={Boolean(updatingId && updatingId === selectedLead?.id)}
       />
 
-      {/* Modal de Agendamento Rápido de Data/Horário */}
       <ScheduleModal
         lead={leadToSchedule}
         isOpen={isScheduleModalOpen}
-        onClose={fecharAgendamento}
+        onClose={() => {
+          setIsScheduleModalOpen(false);
+          setLeadToSchedule(null);
+        }}
         onConfirmSchedule={confirmarAgendamento}
         isSaving={Boolean(updatingId && updatingId === leadToSchedule?.id)}
       />
 
-      {/* Sistema de Toasts */}
+      {/* Sistema de Notificações Toast */}
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
-}
-
-function getStatusLabel(status: LeadStatus): string {
-  switch (status) {
-    case "NOVO":
-      return "Pré-Agendamentos";
-    case "AGUARDANDO_CONFIRMACAO":
-      return "Em Negociação";
-    case "AGENDADO":
-      return "Consultas Agendadas";
-    case "TRANSBORDO_HUMANO":
-      return "Atenção da Recepção";
-  }
 }
