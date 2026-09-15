@@ -16,9 +16,10 @@ interface ScheduleModalProps {
   lead: Lead | null;
   onClose: () => void;
   onConfirmSchedule: (
-    leadId: string,
+    lead: Lead,
     dataAgendamento: string,
     horarioAgendado: string,
+    profissional: string,
     observacoes?: string
   ) => Promise<void>;
   isSaving?: boolean;
@@ -50,9 +51,10 @@ interface ScheduleModalFormProps {
   lead: Lead;
   onClose: () => void;
   onConfirmSchedule: (
-    leadId: string,
+    lead: Lead,
     dataAgendamento: string,
     horarioAgendado: string,
+    profissional: string,
     observacoes?: string
   ) => Promise<void>;
   isSaving: boolean;
@@ -81,12 +83,13 @@ const ScheduleModalForm: React.FC<ScheduleModalFormProps> = ({
 
   const [data, setData] = useState<string>(getDefaultDate);
   const [horario, setHorario] = useState<string>(getDefaultHorario);
+  const [profissional, setProfissional] = useState<string>("Dra. Camila Duarte");
   const [obs, setObs] = useState<string>(() => lead.observacoes || "");
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!data || !horario) return;
-    await onConfirmSchedule(lead.id, data, horario, obs);
+    await onConfirmSchedule(lead, data, horario, profissional, obs);
     onClose();
   };
 
@@ -185,6 +188,22 @@ const ScheduleModalForm: React.FC<ScheduleModalFormProps> = ({
               className="w-full text-xs font-medium bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
             />
           </div>
+        </div>
+
+        {/* Profissional Responsável */}
+        <div>
+          <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5 flex items-center gap-1.5">
+            <User className="w-3.5 h-3.5 text-slate-400" />
+            Profissional Responsável
+          </label>
+          <select
+            value={profissional}
+            onChange={(e) => setProfissional(e.target.value)}
+            className="w-full text-xs font-medium bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 cursor-pointer"
+          >
+            <option value="Dra. Camila Duarte">Dra. Camila Duarte (Clínica Geral / Estética)</option>
+            <option value="Dr. Lucas Ramos">Dr. Lucas Ramos (Ortodontia / Implantes)</option>
+          </select>
         </div>
 
         {/* Quick Time Presets */}

@@ -85,6 +85,32 @@ export const ChatView: React.FC<ChatViewProps> = ({ onEditCustomer }) => {
 
   const activeConversation = conversations.find((c) => c.telefone === selectedTelefone) || null;
 
+  // Salvar notas clínicas com persistência no banco
+  const handleSaveNotes = async (notes: string) => {
+    if (!activeConversation) return;
+    const cleanTel = activeConversation.telefone.replace(/\D/g, "");
+
+    try {
+      const leads = await api.getLeads();
+      const lead = leads.find((l) => l.telefone.replace(/\D/g, "") === cleanTel);
+
+      if (lead) {
+        await api.updateLead(lead.id, { observacoes: notes });
+      } else {
+        await api.createCustomer({
+          nomeCompleto: activeConversation.nome,
+          telefone: cleanTel,
+          observacoes: notes,
+        });
+      }
+
+      await carregarConversas();
+    } catch (err) {
+      console.error("Erro ao salvar observações do paciente:", err);
+      throw err;
+    }
+  };
+
   return (
     <div className="h-[calc(100vh-8.5rem)] min-h-[580px] bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-xs overflow-hidden flex transition-all duration-200 ease-in-out">
       {/* Coluna 1: Lista de Conversas (320px) */}
@@ -115,6 +141,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ onEditCustomer }) => {
                 onEditCustomer(activeConversation.telefone);
               }
             }}
+            onSaveNotes={handleSaveNotes}
           />
         </div>
       )}

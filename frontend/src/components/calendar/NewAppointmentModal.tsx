@@ -1,6 +1,7 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { X, Calendar, User, Phone, Stethoscope } from "lucide-react";
-import type { CreateAppointmentDTO } from "../../types/appointment";
+import type { CreateAppointmentDTO, ProfessionalItem } from "../../types/appointment";
+import { api } from "../../services/api";
 
 interface NewAppointmentModalProps {
   isOpen: boolean;
@@ -26,8 +27,20 @@ export const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({
   const [horarioInicio, setHorarioInicio] = useState("09:00");
   const [horarioFim, setHorarioFim] = useState("10:00");
   const [profissional, setProfissional] = useState("Dra. Camila Duarte");
+  const [professionals, setProfessionals] = useState<ProfessionalItem[]>([]);
   const [observacoes, setObservacoes] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      api.getProfessionals().then((list) => {
+        setProfessionals(list);
+        if (list.length > 0) {
+          setProfissional(list[0].nome);
+        }
+      }).catch(console.error);
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -184,8 +197,18 @@ export const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({
                 onChange={(e) => setProfissional(e.target.value)}
                 className="w-full p-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
               >
-                <option value="Dra. Camila Duarte">Dra. Camila Duarte</option>
-                <option value="Dr. Lucas Ramos">Dr. Lucas Ramos</option>
+                {professionals.length > 0 ? (
+                  professionals.map((p) => (
+                    <option key={p.id} value={p.nome}>
+                      {p.nome} {p.especialidade ? `(${p.especialidade})` : ""}
+                    </option>
+                  ))
+                ) : (
+                  <>
+                    <option value="Dra. Camila Duarte">Dra. Camila Duarte</option>
+                    <option value="Dr. Lucas Ramos">Dr. Lucas Ramos</option>
+                  </>
+                )}
               </select>
             </div>
           </div>

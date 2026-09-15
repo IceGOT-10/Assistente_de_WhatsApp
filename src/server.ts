@@ -12,6 +12,9 @@ import { DashboardService } from "./services/dashboard.service";
 import { AppointmentService } from "./services/appointment.service";
 import { ChatService } from "./services/chat.service";
 import { CustomerService } from "./services/customer.service";
+import { ClinicDataService } from "./services/clinicData.service";
+import { AuthService } from "./services/auth.service";
+import { authMiddleware, AuthenticatedRequest } from "./middlewares/auth.middleware";
 
 const prisma = new PrismaClient();
 const app = express();
@@ -21,6 +24,30 @@ app.use(express.json());
 
 app.get("/api/health", (req, res) => {
   res.json({ status: "online", clinic: ENV.CLINIC_NAME });
+});
+
+// ==================== AUTENTICAÇÃO E OPERADORES ====================
+app.post("/api/auth/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const result = await AuthService.login(email, password);
+    res.json(result);
+  } catch (error: any) {
+    console.warn(`🔒 [Login] Falha de autenticação para '${req.body?.email}':`, error.message);
+    res.status(401).json({ error: error.message || "Credenciais inválidas" });
+  }
+});
+
+app.get("/api/auth/me", authMiddleware, async (req: AuthenticatedRequest, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: "Sessão inválida" });
+    }
+    const profile = await AuthService.getProfile(req.user.id);
+    res.json(profile);
+  } catch (error: any) {
+    res.status(401).json({ error: error.message || "Sessão expirada" });
+  }
 });
 
 // ==================== APPOINTMENTS (AGENDA) ====================
@@ -179,7 +206,7 @@ app.get("/api/ai/config", async (req, res) => {
   }
 });
 
-app.put("/api/ai/config", async (req, res) => {
+app.put("/api/ai/config", authMiddleware, async (req, res) => {
   try {
     const updated = await AiConfigService.updateConfig(req.body);
     res.json(updated);
@@ -206,6 +233,27 @@ app.get("/api/dashboard/upcoming", async (req, res) => {
   } catch (error) {
     console.error("Erro ao buscar próximos atendimentos:", error);
     res.status(500).json({ error: "Erro ao buscar próximos atendimentos" });
+  }
+});
+
+// ==================== PROFISSIONAIS & SERVIÇOS ====================
+app.get("/api/professionals", async (req, res) => {
+  try {
+    const professionals = await ClinicDataService.listProfessionals();
+    res.json(professionals);
+  } catch (error) {
+    console.error("Erro ao listar profissionais:", error);
+    res.status(500).json({ error: "Erro ao listar profissionais" });
+  }
+});
+
+app.get("/api/services", async (req, res) => {
+  try {
+    const services = await ClinicDataService.listServices();
+    res.json(services);
+  } catch (error) {
+    console.error("Erro ao listar serviços:", error);
+    res.status(500).json({ error: "Erro ao listar serviços" });
   }
 });
 
@@ -239,18 +287,36 @@ app.patch("/api/leads/:id/status", async (req, res) => {
 app.put("/api/leads/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const { nomeCompleto, telefone, procedimento, tipoAtendimento, nomeConvenio, periodoPreferencia } = req.body;
+    const {
+      nomeCompleto,
+      telefone,
+      procedimento,
+      tipoAtendimento,
+      nomeConvenio,
+      periodoPreferencia,
+      observacoes,
+      status,
+    } = req.body;
+
+    const dataToUpdate: any = {
+      nomeCompleto,
+      telefone: telefone ? telefone.replace(/\D/g, "") : undefined,
+      procedimento,
+      tipoAtendimento,
+      nomeConvenio: tipoAtendimento === "CONVENIO" ? (nomeConvenio || null) : null,
+      periodoPreferencia,
+    };
+
+    if (observacoes !== undefined) {
+      dataToUpdate.observacoes = observacoes;
+    }
+    if (status) {
+      dataToUpdate.status = status;
+    }
 
     const leadAtualizado = await prisma.lead.update({
       where: { id },
-      data: {
-        nomeCompleto,
-        telefone,
-        procedimento,
-        tipoAtendimento,
-        nomeConvenio,
-        periodoPreferencia,
-      },
+      data: dataToUpdate,
     });
 
     res.json(leadAtualizado);
@@ -301,6 +367,16 @@ app.post("/api/test/simulate-message", async (req, res) => {
     texto: text,
     remetente: MessageSender.PACIENTE,
   });
+
+  // 1. Respeito à Chave Mestra iaAtiva de AiConfig
+  const aiConfig = await AiConfigService.getConfig();
+  if (!aiConfig.iaAtiva) {
+    console.log(`🔇 [Simulador] Automação silenciada para ${remoteJid}: iaAtiva está desativada.`);
+    return res.json({
+      reply: "⚠️ A assistente virtual está temporariamente desativada pela gerência da clínica.",
+      source: "ia_desativada",
+    });
+  }
 
   const pausada = await LeadService.isIaPausada(telefoneLimpo);
   if (pausada) {
@@ -392,9 +468,15 @@ function iniciarMonitorDeInatividade() {
 }
 
 async function bootstrap() {
-  // Garante a configuração padrão da IA Sofia
+  // Garante a configuração padrão da IA Sofia e seed de profissionais/serviços
   await AiConfigService.ensureDefaultConfig();
   console.log("⚙️ [AiConfig] Configuração padrão da assistente Sofia inicializada.");
+
+  await ClinicDataService.ensureSeed();
+  console.log("👨‍⚕️ [ClinicData] Profissionais e serviços padrão garantidos.");
+
+  await AuthService.ensureDefaultAdmin();
+  console.log("👤 [Auth] Administrador padrão inicializado.");
 
   app.listen(ENV.PORT, () => {
     console.log(`🚀 [Servidor HTTP] Operando na porta ${ENV.PORT}`);
@@ -413,6 +495,13 @@ async function bootstrap() {
       texto: consolidatedText,
       remetente: MessageSender.PACIENTE,
     });
+
+    // 1. Respeito à Chave Mestra iaAtiva de AiConfig
+    const aiConfig = await AiConfigService.getConfig();
+    if (!aiConfig.iaAtiva) {
+      console.log(`🔇 [WhatsApp] Mensagem de ${remoteJid} ignorada pela automação: iaAtiva está desativada.`);
+      return;
+    }
 
     const pausada = await LeadService.isIaPausada(telefoneLimpo);
     if (pausada) {

@@ -18,9 +18,13 @@ import { CalendarView } from "./components/calendar/CalendarView";
 import { ChatView } from "./components/chat/ChatView";
 import { CustomersView } from "./components/customers/CustomersView";
 import { AiSettingsView } from "./components/ai-settings/AiSettingsView";
-import { BarChart3, TrendingUp, Users, CalendarCheck, Sparkles } from "lucide-react";
+import { LoginView } from "./components/auth/LoginView";
+import { ReportsView } from "./components/reports/ReportsView";
+import { useAuth } from "./context/AuthContext";
+import { Loader2 } from "lucide-react";
 
 export default function App() {
+  const { isAuthenticated, isLoading } = useAuth();
   const { theme, setTheme } = useTheme();
   const { activeTab, setActiveTab } = useNavigation();
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
@@ -58,8 +62,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    carregarLeads();
-  }, [carregarLeads]);
+    if (isAuthenticated) {
+      carregarLeads();
+    }
+  }, [carregarLeads, isAuthenticated]);
 
   // Abertura de prontuário por telefone (acionado pelo chat ou tela de clientes)
   const abrirDetalhesPorTelefone = (telefone: string) => {
@@ -161,7 +167,23 @@ export default function App() {
       setUpdatingId(id);
       const atualizado = await api.updateLead(id, dto);
 
-      setLeads((prev) => prev.map((l) => (l.id === id ? atualizado : l)));
+      // Se informou data e horário de agendamento na edição do lead, cria consulta persistente no Appointment
+      if (dto.dataAgendamento && dto.horarioAgendado) {
+        await api.createAppointment({
+          leadId: id,
+          nomeCompleto: dto.nomeCompleto || atualizado.nomeCompleto,
+          telefone: dto.telefone || atualizado.telefone,
+          procedimento: dto.procedimento || atualizado.procedimento,
+          tipoAtendimento: dto.tipoAtendimento || atualizado.tipoAtendimento,
+          nomeConvenio: dto.nomeConvenio,
+          data: dto.dataAgendamento,
+          horarioInicio: dto.horarioAgendado,
+          profissional: "Dra. Camila Duarte",
+          observacoes: dto.observacoes,
+        });
+      }
+
+      await carregarLeads();
       setSelectedLead(atualizado);
 
       addToast({
@@ -183,33 +205,36 @@ export default function App() {
   };
 
   const confirmarAgendamento = async (
-    id: string,
+    lead: Lead,
     dataStr: string,
     horarioStr: string,
+    profissional: string,
     observacoes?: string
   ) => {
     try {
-      setUpdatingId(id);
-      const atualizado = await api.updateLead(id, {
-        status: "AGENDADO",
-        dataAgendamento: dataStr,
-        horarioAgendado: horarioStr,
+      setUpdatingId(lead.id);
+      await api.createAppointment({
+        leadId: lead.id,
+        nomeCompleto: lead.nomeCompleto,
+        telefone: lead.telefone,
+        procedimento: lead.procedimento,
+        tipoAtendimento: lead.tipoAtendimento,
+        nomeConvenio: lead.nomeConvenio,
+        data: dataStr,
+        horarioInicio: horarioStr,
+        profissional: profissional || "Dra. Camila Duarte",
         observacoes,
       });
 
-      setLeads((prev) => prev.map((l) => (l.id === id ? atualizado : l)));
-
-      if (selectedLead && selectedLead.id === id) {
-        setSelectedLead(atualizado);
-      }
+      await carregarLeads();
 
       setIsScheduleModalOpen(false);
       setLeadToSchedule(null);
 
       addToast({
         type: "success",
-        title: "Consulta Agendada!",
-        message: `${atualizado.nomeCompleto} agendado para ${dataStr} às ${horarioStr}.`,
+        title: "Consulta Agendada no PostgreSQL!",
+        message: `${lead.nomeCompleto} agendado para ${dataStr} às ${horarioStr} com ${profissional || "Dra. Camila Duarte"}.`,
       });
     } catch (err) {
       console.error("Erro ao confirmar agendamento:", err);
@@ -225,6 +250,21 @@ export default function App() {
 
   // Contagem de atendimentos que requerem intervenção humana
   const unreadCount = leads.filter((l) => l.status === "TRANSBORDO_HUMANO").length;
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3 text-slate-500">
+          <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
+          <span className="text-xs font-semibold">Carregando painel clínico...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <LoginView />;
+  }
 
   return (
     <div className="min-h-screen bg-slate-50/70 dark:bg-slate-950 text-slate-800 dark:text-slate-100 flex font-sans selection:bg-indigo-500 selection:text-white transition-colors duration-200 ease-in-out">
@@ -244,6 +284,7 @@ export default function App() {
           theme={theme}
           onThemeChange={setTheme}
           onOpenMobileMenu={() => setIsMobileSidebarOpen(true)}
+          onNavigateTab={setActiveTab}
         />
 
         {/* 3. Área de Conteúdo da Tela Selecionada com Transições Nativas Tailwind v4 */}
@@ -265,75 +306,7 @@ export default function App() {
             <CustomersView onOpenDetails={abrirDetalhesPorTelefone} />
           )}
 
-          {activeTab === "relatorios" && (
-            <div className="space-y-6 transition-all duration-200 ease-in-out">
-              <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/80 dark:border-slate-800 p-6 shadow-xs">
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="w-10 h-10 rounded-xl bg-amber-50 dark:bg-amber-950/60 text-amber-600 flex items-center justify-center">
-                    <BarChart3 className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h2 className="text-lg font-black text-slate-900 dark:text-white">
-                      Relatórios e Métricas de Conversão
-                    </h2>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">
-                      Desempenho operacional da recepção e taxa de conversão da IA Sofia.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
-                  <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
-                    <div className="flex items-center justify-between text-slate-400 mb-2">
-                      <span className="text-xs font-bold uppercase tracking-wider">Conversão de Leads</span>
-                      <TrendingUp className="w-4 h-4 text-emerald-500" />
-                    </div>
-                    <span className="text-2xl font-black text-slate-900 dark:text-white">
-                      {leads.length > 0
-                        ? `${Math.round((leads.filter((l) => l.status === "AGENDADO").length / leads.length) * 100)}%`
-                        : "0%"}
-                    </span>
-                    <p className="text-[11px] text-slate-400 mt-1">
-                      Leads convertidos em consultas confirmadas
-                    </p>
-                  </div>
-
-                  <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
-                    <div className="flex items-center justify-between text-slate-400 mb-2">
-                      <span className="text-xs font-bold uppercase tracking-wider">Total de Pacientes</span>
-                      <Users className="w-4 h-4 text-indigo-500" />
-                    </div>
-                    <span className="text-2xl font-black text-slate-900 dark:text-white">
-                      {leads.length}
-                    </span>
-                    <p className="text-[11px] text-slate-400 mt-1">
-                      Contatos triados na base de dados
-                    </p>
-                  </div>
-
-                  <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
-                    <div className="flex items-center justify-between text-slate-400 mb-2">
-                      <span className="text-xs font-bold uppercase tracking-wider">Consultas Marcadas</span>
-                      <CalendarCheck className="w-4 h-4 text-sky-500" />
-                    </div>
-                    <span className="text-2xl font-black text-slate-900 dark:text-white">
-                      {leads.filter((l) => l.status === "AGENDADO").length}
-                    </span>
-                    <p className="text-[11px] text-slate-400 mt-1">
-                      Agendamentos finalizados
-                    </p>
-                  </div>
-                </div>
-
-                <div className="mt-6 p-4 rounded-2xl bg-linear-to-r from-indigo-50/50 to-purple-50/50 dark:from-indigo-950/20 dark:to-purple-950/20 border border-indigo-100 dark:border-indigo-900/50 flex items-center gap-3">
-                  <Sparkles className="w-5 h-5 text-indigo-600 dark:text-indigo-400 shrink-0" />
-                  <p className="text-xs text-slate-600 dark:text-slate-300">
-                    A assistente Sofia realizou atendimentos com respostas instantâneas, reduzindo o tempo médio de espera dos pacientes na recepção para menos de 5 segundos.
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
+          {activeTab === "relatorios" && <ReportsView />}
 
           {activeTab === "configuracoes" && <AiSettingsView />}
         </main>

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   ExternalLink,
   UserCog,
@@ -19,9 +19,13 @@ export const ChatCustomerSidebar: React.FC<ChatCustomerSidebarProps> = ({
   onEditCustomer,
   onSaveNotes,
 }) => {
-  const [notes, setNotes] = useState("");
+  const [notes, setNotes] = useState(() => conversation?.observacoes || "");
   const [isSaving, setIsSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
+
+  useEffect(() => {
+    setNotes(conversation?.observacoes || "");
+  }, [conversation?.telefone, conversation?.observacoes]);
 
   if (!conversation) return null;
 

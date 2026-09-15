@@ -23,7 +23,24 @@ export interface AppointmentItem {
   };
 }
 
+export interface ProfessionalItem {
+  id: string;
+  nome: string;
+  especialidade: string;
+  corIdentificador?: string | null;
+  ativo: boolean;
+}
+
+export interface ServiceItem {
+  id: string;
+  nome: string;
+  duracaoMinutos: number;
+  precoBase?: number | null;
+  ativo: boolean;
+}
+
 export interface CreateAppointmentDTO {
+  leadId?: string;
   nomeCompleto: string;
   telefone: string;
   procedimento: string;
@@ -31,8 +48,10 @@ export interface CreateAppointmentDTO {
   nomeConvenio?: string | null;
   data: string; // "YYYY-MM-DD"
   horarioInicio: string;
-  horarioFim: string;
+  horarioFim?: string;
   profissional: string;
+  professionalId?: string | null;
+  serviceId?: string | null;
   observacoes?: string | null;
 }
 

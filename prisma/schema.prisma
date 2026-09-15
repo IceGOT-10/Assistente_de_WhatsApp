@@ -38,6 +38,12 @@ enum MessageSender {
   ATENDENTE
 }
 
+enum Role {
+  ADMIN
+  ATENDENTE
+  DENTISTA
+}
+
 model Lead {
   id                 String            @id @default(uuid())
   nomeCompleto       String
@@ -65,22 +71,65 @@ model SessionControl {
   atendimentoAtivo Boolean   @default(true)
 }
 
+model Professional {
+  id               String        @id @default(uuid())
+  nome             String        @unique
+  especialidade    String
+  corIdentificador String?       @default("#4f46e5")
+  ativo            Boolean       @default(true)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  appointments     Appointment[]
+}
+
+model Service {
+  id             String        @id @default(uuid())
+  nome           String        @unique
+  duracaoMinutos Int           @default(45)
+  precoBase      Decimal?      @db.Decimal(10, 2)
+  ativo          Boolean       @default(true)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  appointments   Appointment[]
+}
+
 model Appointment {
-  id            String            @id @default(uuid())
-  leadId        String
-  lead          Lead              @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  data          DateTime          @db.Date
-  horarioInicio String
-  horarioFim    String
-  profissional  String
-  servico       String
-  status        StatusAppointment @default(AGENDADO)
-  observacoes   String?           @db.Text
-  createdAt     DateTime          @default(now())
-  updatedAt     DateTime          @updatedAt
+  id             String            @id @default(uuid())
+  leadId         String
+  lead           Lead              @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  data           DateTime          @db.Date
+  horarioInicio  String
+  horarioFim     String
+  profissional   String
+  professionalId String?
+  professional   Professional?     @relation(fields: [professionalId], references: [id], onDelete: SetNull)
+  servico        String
+  serviceId      String?
+  service        Service?          @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+  status         StatusAppointment @default(AGENDADO)
+  observacoes    String?           @db.Text
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
 
   @@index([data])
   @@index([profissional])
+  @@index([professionalId])
+  @@index([serviceId])
+}
+
+model User {
+  id        String    @id @default(uuid())
+  nome      String
+  email     String    @unique
+  senhaHash String
+  role      Role      @default(ATENDENTE)
+  ativo     Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  messages  Message[]
 }
 
 model Message {
@@ -89,6 +138,8 @@ model Message {
   remoteJid String
   leadId    String?
   lead      Lead?         @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  userId    String?
+  user      User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
   texto     String        @db.Text
   remetente MessageSender
   lida      Boolean       @default(false)
@@ -97,6 +148,7 @@ model Message {
   @@index([telefone])
   @@index([remoteJid])
   @@index([createdAt])
+  @@index([userId])
 }
 
 model AiConfig {

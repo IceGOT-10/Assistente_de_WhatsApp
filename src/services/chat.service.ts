@@ -17,6 +17,8 @@ export interface ConversationSummary {
   procedimento?: string | null;
   tipoAtendimento?: string | null;
   statusAba: "IA" | "AGUARDANDO" | "RESOLVIDA";
+  leadId?: string | null;
+  observacoes?: string | null;
 }
 
 export class ChatService {
@@ -82,6 +84,8 @@ export class ChatService {
         procedimento: lead?.procedimento || null,
         tipoAtendimento: lead?.tipoAtendimento || null,
         statusAba,
+        leadId: lead?.id || null,
+        observacoes: lead?.observacoes || null,
       });
     }
 
@@ -112,6 +116,8 @@ export class ChatService {
           procedimento: lead.procedimento,
           tipoAtendimento: lead.tipoAtendimento,
           statusAba: "IA",
+          leadId: lead.id,
+          observacoes: lead.observacoes,
         });
       }
     }

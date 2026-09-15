@@ -5,6 +5,10 @@ import type { ConversationSummary, ChatMessage } from "../types/chat";
 import type { CustomerListResponse, CustomerItem } from "../types/customer";
 import type { AiConfigData } from "../types/aiConfig";
 import type { DashboardStatsData, UpcomingAppointment } from "../types/dashboard";
+import type { AuthUser, LoginResponse } from "../types/auth";
+
+export const AUTH_TOKEN_KEY = "odonto_auth_token";
+export const AUTH_USER_KEY = "odonto_auth_user";
 
 const API_BASE_URL = "http://localhost:3000/api";
 
@@ -15,6 +19,28 @@ const apiClient = axios.create({
     "Content-Type": "application/json",
   },
 });
+
+// Interceptor de requisições: anexa token Bearer se disponível
+apiClient.interceptors.request.use((config) => {
+  const token = localStorage.getItem(AUTH_TOKEN_KEY);
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// Interceptor de respostas: trata 401 limpando sessão e notificando app
+apiClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      localStorage.removeItem(AUTH_TOKEN_KEY);
+      localStorage.removeItem(AUTH_USER_KEY);
+      window.dispatchEvent(new Event("odonto_unauthorized"));
+    }
+    return Promise.reject(error);
+  }
+);
 
 export const api = {
   /**
@@ -101,6 +127,16 @@ export const api = {
     return response.data;
   },
 
+  async getProfessionals(): Promise<any[]> {
+    const response = await apiClient.get<any[]>("/professionals");
+    return response.data;
+  },
+
+  async getServices(): Promise<any[]> {
+    const response = await apiClient.get<any[]>("/services");
+    return response.data;
+  },
+
   // ==================== CHAT & WHATSAPP ====================
   async getConversations(): Promise<ConversationSummary[]> {
     const response = await apiClient.get<ConversationSummary[]>("/chat/conversations");
@@ -168,4 +204,16 @@ export const api = {
     const response = await apiClient.put<AiConfigData>("/ai/config", data);
     return response.data;
   },
+
+  // ==================== AUTENTICAÇÃO ====================
+  async login(email: string, password: string): Promise<LoginResponse> {
+    const response = await apiClient.post<LoginResponse>("/auth/login", { email, password });
+    return response.data;
+  },
+
+  async getMe(): Promise<AuthUser> {
+    const response = await apiClient.get<AuthUser>("/auth/me");
+    return response.data;
+  },
 };
+

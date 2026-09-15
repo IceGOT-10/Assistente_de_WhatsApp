@@ -9,8 +9,10 @@ import {
   Stethoscope,
   X,
   Sparkles,
+  LogOut,
 } from "lucide-react";
 import type { NavigationTab } from "../../hooks/useNavigation";
+import { useAuth } from "../../context/AuthContext";
 
 interface SidebarProps {
   activeTab: NavigationTab;
@@ -27,6 +29,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isOpenMobile,
   onCloseMobile,
 }) => {
+  const { user, logout } = useAuth();
+
+  const getRoleLabel = (role?: string) => {
+    switch (role) {
+      case "ADMIN":
+        return "Administrador";
+      case "DENTISTA":
+        return "Dentista / Clínico";
+      case "ATENDENTE":
+      default:
+        return "Atendente / Recepção";
+    }
+  };
+
+  const getInitials = (name?: string) => {
+    if (!name) return "OP";
+    const parts = name.trim().split(" ").filter(Boolean);
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  };
+
   const menuItems = [
     {
       id: "inicio" as NavigationTab,
@@ -157,23 +180,34 @@ export const Sidebar: React.FC<SidebarProps> = ({
           })}
         </nav>
 
-        {/* Rodapé Fixo: Usuário / Atendente Conectada */}
+        {/* Rodapé Fixo: Usuário Conectado e Botão de Logout */}
         <div className="p-3 border-t border-slate-100 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-900/50">
-          <div className="flex items-center gap-3 p-2 rounded-xl bg-white dark:bg-slate-800/70 border border-slate-200/60 dark:border-slate-700/60 shadow-xs">
-            <div className="relative shrink-0">
-              <div className="w-9 h-9 rounded-full bg-linear-to-tr from-indigo-500 to-sky-400 text-white flex items-center justify-center font-bold text-xs shadow-xs">
-                MS
+          <div className="flex items-center justify-between gap-2 p-2 rounded-xl bg-white dark:bg-slate-800/70 border border-slate-200/60 dark:border-slate-700/60 shadow-xs">
+            <div className="flex items-center gap-2.5 min-w-0 flex-1">
+              <div className="relative shrink-0">
+                <div className="w-9 h-9 rounded-full bg-linear-to-tr from-indigo-600 to-sky-500 text-white flex items-center justify-center font-bold text-xs shadow-xs">
+                  {getInitials(user?.nome)}
+                </div>
+                <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-slate-900" />
               </div>
-              <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-slate-900" />
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate" title={user?.nome}>
+                  {user?.nome || "Operador"}
+                </p>
+                <p className="text-[11px] text-slate-400 dark:text-slate-400 truncate">
+                  {getRoleLabel(user?.role)}
+                </p>
+              </div>
             </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">
-                Maria Souza
-              </p>
-              <p className="text-[11px] text-slate-400 dark:text-slate-400 truncate">
-                Atendente / Recepção
-              </p>
-            </div>
+
+            <button
+              type="button"
+              onClick={logout}
+              className="p-1.5 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition-colors cursor-pointer shrink-0"
+              title="Sair do sistema (Logout)"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
           </div>
         </div>
       </aside>

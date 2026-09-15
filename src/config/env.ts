@@ -17,4 +17,6 @@ export const ENV = {
   GEMINI_API_KEY: getEnv("GEMINI_API_KEY", ""),
   CLINIC_NAME: getEnv("CLINIC_NAME", "Clínica OdontoPrime"),
   BUFFER_DEBOUNCE_MS: parseInt(getEnv("BUFFER_DEBOUNCE_MS", "5000"), 10),
+  JWT_SECRET: getEnv("JWT_SECRET", "odontoprime_super_secret_jwt_key_2026_odontoprime"),
 };
+

@@ -6,6 +6,7 @@ import {
   Calendar as CalendarIcon,
   Filter,
 } from "lucide-react";
+import type { ProfessionalItem } from "../../types/appointment";
 
 interface CalendarToolbarProps {
   currentDate: Date;
@@ -19,6 +20,7 @@ interface CalendarToolbarProps {
   selectedStatus: string;
   onStatusChange: (val: string) => void;
   onOpenNewModal: () => void;
+  professionals?: ProfessionalItem[];
 }
 
 export const CalendarToolbar: React.FC<CalendarToolbarProps> = ({
@@ -33,6 +35,7 @@ export const CalendarToolbar: React.FC<CalendarToolbarProps> = ({
   selectedStatus,
   onStatusChange,
   onOpenNewModal,
+  professionals = [],
 }) => {
   const monthYearStr = currentDate.toLocaleDateString("pt-BR", {
     month: "long",
@@ -128,8 +131,11 @@ export const CalendarToolbar: React.FC<CalendarToolbarProps> = ({
             className="text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-700 dark:text-slate-200 font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
           >
             <option value="ALL">Profissional: Todos</option>
-            <option value="Dra. Camila Duarte">Dra. Camila Duarte</option>
-            <option value="Dr. Lucas Ramos">Dr. Lucas Ramos</option>
+            {professionals.map((p) => (
+              <option key={p.id} value={p.nome}>
+                {p.nome}
+              </option>
+            ))}
           </select>
 
           <select

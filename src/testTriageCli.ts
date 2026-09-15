@@ -1,9 +1,9 @@
 import readline from "readline/promises";
 import { stdin as input, stdout as output } from "process";
 
-const FAKE_REMOTE_JID = "5511988887777@s.whatsapp.net";
+const FAKE_REMOTE_JID = "5511988887773@s.whatsapp.net";
 const API_URL = "http://localhost:3000/api/test/simulate-message";
-const RESET_URL = "http://localhost:3000/api/sessions/5511988887777/reset";
+const RESET_URL = "http://localhost:3000/api/sessions/5511988887773/reset";
 const DISCONNECT_URL = "http://localhost:3000/api/whatsapp/disconnect";
 
 async function main() {

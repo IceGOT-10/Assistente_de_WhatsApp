@@ -22,5 +22,7 @@ export interface ConversationSummary {
   procedimento?: string | null;
   tipoAtendimento?: string | null;
   statusAba: "IA" | "AGUARDANDO" | "RESOLVIDA";
+  leadId?: string | null;
+  observacoes?: string | null;
 }
 

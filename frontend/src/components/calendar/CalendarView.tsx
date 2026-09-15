@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { CalendarToolbar } from "./CalendarToolbar";
 import { WeeklyScheduleGrid } from "./WeeklyScheduleGrid";
+import { DailyScheduleGrid } from "./DailyScheduleGrid";
+import { MonthlyScheduleGrid } from "./MonthlyScheduleGrid";
 import { NewAppointmentModal } from "./NewAppointmentModal";
 import { api } from "../../services/api";
-import type { AppointmentItem, CreateAppointmentDTO } from "../../types/appointment";
+import type { AppointmentItem, CreateAppointmentDTO, ProfessionalItem } from "../../types/appointment";
 import { Loader2 } from "lucide-react";
 
 export const CalendarView: React.FC = () => {
@@ -11,11 +13,18 @@ export const CalendarView: React.FC = () => {
   const [viewMode, setViewMode] = useState<"dia" | "semana" | "mes">("semana");
   const [selectedProfissional, setSelectedProfissional] = useState<string>("ALL");
   const [selectedStatus, setSelectedStatus] = useState<string>("ALL");
+  const [professionals, setProfessionals] = useState<ProfessionalItem[]>([]);
 
   const [appointments, setAppointments] = useState<AppointmentItem[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [selectedAppointment, setSelectedAppointment] = useState<AppointmentItem | null>(null);
+
+  useEffect(() => {
+    api.getProfessionals()
+      .then((data) => setProfessionals(data))
+      .catch((err) => console.error("Erro ao carregar profissionais:", err));
+  }, []);
 
   const carregarAgendamentos = useCallback(async () => {
     try {
@@ -39,7 +48,13 @@ export const CalendarView: React.FC = () => {
   const handlePrevPeriod = () => {
     setCurrentDate((prev) => {
       const next = new Date(prev);
-      next.setDate(next.getDate() - 7);
+      if (viewMode === "dia") {
+        next.setDate(next.getDate() - 1);
+      } else if (viewMode === "mes") {
+        next.setMonth(next.getMonth() - 1);
+      } else {
+        next.setDate(next.getDate() - 7);
+      }
       return next;
     });
   };
@@ -47,7 +62,13 @@ export const CalendarView: React.FC = () => {
   const handleNextPeriod = () => {
     setCurrentDate((prev) => {
       const next = new Date(prev);
-      next.setDate(next.getDate() + 7);
+      if (viewMode === "dia") {
+        next.setDate(next.getDate() + 1);
+      } else if (viewMode === "mes") {
+        next.setMonth(next.getMonth() + 1);
+      } else {
+        next.setDate(next.getDate() + 7);
+      }
       return next;
     });
   };
@@ -84,14 +105,27 @@ export const CalendarView: React.FC = () => {
         selectedStatus={selectedStatus}
         onStatusChange={setSelectedStatus}
         onOpenNewModal={() => setIsModalOpen(true)}
+        professionals={professionals}
       />
 
-      {/* Grade Semanal */}
+      {/* Grade de Visualização (Dia / Semana / Mês) */}
       {isLoading ? (
         <div className="flex flex-col items-center justify-center py-28 text-slate-400 gap-3">
           <Loader2 className="w-8 h-8 text-indigo-600 animate-spin" />
           <span className="text-xs font-semibold">Carregando horários da clínica...</span>
         </div>
+      ) : viewMode === "dia" ? (
+        <DailyScheduleGrid
+          currentDate={currentDate}
+          appointments={appointments}
+          onSelectAppointment={(apt) => setSelectedAppointment(apt)}
+        />
+      ) : viewMode === "mes" ? (
+        <MonthlyScheduleGrid
+          currentDate={currentDate}
+          appointments={appointments}
+          onSelectAppointment={(apt) => setSelectedAppointment(apt)}
+        />
       ) : (
         <WeeklyScheduleGrid
           currentDate={currentDate}

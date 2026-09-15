@@ -27,7 +27,18 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const [inputText, setInputText] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [isTakingOver, setIsTakingOver] = useState(false);
+  const [attachmentAlert, setAttachmentAlert] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setAttachmentAlert(`Upload de mídia em fila de envio: ${file.name}`);
+      setTimeout(() => setAttachmentAlert(null), 4000);
+      e.target.value = "";
+    }
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -212,11 +223,36 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         <div ref={messagesEndRef} />
       </div>
 
+      {/* Aviso de Upload em Fila */}
+      {attachmentAlert && (
+        <div className="px-4 py-2 bg-indigo-50 dark:bg-indigo-950/60 border-t border-indigo-100 dark:border-indigo-900/50 flex items-center justify-between text-xs text-indigo-700 dark:text-indigo-300 font-semibold animate-in fade-in">
+          <span className="flex items-center gap-1.5">
+            <Paperclip className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+            <span>{attachmentAlert}</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => setAttachmentAlert(null)}
+            className="text-[11px] text-indigo-500 hover:underline cursor-pointer"
+          >
+            Dispensar
+          </button>
+        </div>
+      )}
+
       {/* Barra de Envio Inferior */}
       <div className="p-3 sm:p-4 bg-white dark:bg-slate-900 border-t border-slate-200/80 dark:border-slate-800">
         <form onSubmit={handleSend} className="flex items-center gap-2">
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileChange}
+            className="hidden"
+          />
+
           <button
             type="button"
+            onClick={() => fileInputRef.current?.click()}
             className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer shrink-0"
             title="Anexar arquivo ou imagem"
           >
