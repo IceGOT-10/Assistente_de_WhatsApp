@@ -1,10 +1,10 @@
-# 🦷 Assistente de WhatsApp com IA & Triagem 24h (OdontoPrime) — v0.1.0
+#  Assistente de WhatsApp com IA & Triagem 24h (OdontoPrime) — v0.1.0
 
 Micro-SaaS B2B voltado para automação de atendimento, esclarecimento de dúvidas e triagem automatizada com pré-agendamento para clínicas odontológicas e centros de estética médica.
 
 ---
 
-## 🚀 Tecnologias Utilizadas
+##  Tecnologias Utilizadas
 
 * **Runtime & Linguagem:** Node.js (LTS), TypeScript
 * **Servidor HTTP:** Express
@@ -15,7 +15,7 @@ Micro-SaaS B2B voltado para automação de atendimento, esclarecimento de dúvid
 
 ---
 
-## ⚡ Funcionalidades da Versão 0.1.0
+##  Funcionalidades da Versão 0.1.0
 
 1. **Buffer Anti-Flood (5 segundos):** Agrupa mensagens fragmentadas enviadas em sequência pelo paciente, consolidando em um único bloco antes de acionar o processamento.
 2. **Roteador Híbrido Determinístico:** Respostas instantâneas pré-feitas (< 50ms) para dúvidas estáticas (Localização, Horários, Formas de Pagamento, Lista de Procedimentos e Políticas de Preço), economizando cotas de API.
@@ -31,7 +31,7 @@ Micro-SaaS B2B voltado para automação de atendimento, esclarecimento de dúvid
 
 ---
 
-## 🛠️ Como Executar o Projeto
+##  Como Executar o Projeto
 
 ### 1. Clonar o Repositório e Instalar Dependências
 
